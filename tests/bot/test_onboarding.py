@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from fade.bot.handlers import onboarding
 from fade.db.models import User
 
 FAKE_ADDRESS = "0xFadE0000000000000000000000000000000000aa"
+FAKE_EVM_DEPOSIT = "0xDe9051700000000000000000000000000000BBbb"
 
 
 def make_context(settings, session_factory, has_wallet: bool = True) -> MagicMock:
@@ -19,6 +21,8 @@ def make_context(settings, session_factory, has_wallet: bool = True) -> MagicMoc
     wallets = MagicMock()
     wallets.create_wallet = AsyncMock(return_value=FAKE_ADDRESS)
     wallets.get_wallet_address = AsyncMock(return_value=FAKE_ADDRESS if has_wallet else None)
+    wallets.get_balance = AsyncMock(return_value=Decimal("0"))
+    wallets.get_deposit_addresses = AsyncMock(return_value={"evm": FAKE_EVM_DEPOSIT})
     context.application.bot_data = {
         "settings": settings,
         "sessions": session_factory,
@@ -77,10 +81,14 @@ async def test_attest_callback_records_user_and_creates_wallet(settings, session
 
     context.application.bot_data["wallets"].create_wallet.assert_awaited_once_with(301)
     final_text = update.callback_query.edit_message_text.call_args.args[0]
+    assert onboarding.OVERVIEW_HEADER_NEW in final_text
     assert FAKE_ADDRESS in final_text
+    assert "0.00" in final_text
+    assert FAKE_EVM_DEPOSIT in final_text
+    assert "/wallet" in final_text  # real commands only, nothing invented
 
 
-async def test_start_after_onboarding_welcomes_back(settings, session_factory):
+async def test_start_after_onboarding_shows_overview_with_back_header(settings, session_factory):
     update = make_update()
     update.callback_query = MagicMock()
     update.callback_query.answer = AsyncMock()
@@ -90,7 +98,10 @@ async def test_start_after_onboarding_welcomes_back(settings, session_factory):
 
     update2 = make_update()
     await onboarding.start(update2, context)
-    assert update2.message.reply_text.call_args.args[0] == onboarding.WELCOME_BACK_TEXT
+    text = update2.message.reply_text.call_args.args[0]
+    assert text.startswith(onboarding.OVERVIEW_HEADER_BACK)
+    assert FAKE_ADDRESS in text
+    assert FAKE_EVM_DEPOSIT in text
 
 
 async def test_start_offers_resume_when_wallet_creation_did_not_finish(settings, session_factory):

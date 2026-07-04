@@ -1,7 +1,8 @@
 """Onboarding: /start attestation gate + wallet creation (PRD F-1, D-7).
 
-The attestation gate and wallet-address screens are money-adjacent: plain and
-precise, no jokes.
+The attestation gate is money-adjacent: plain and precise, no jokes. The
+post-onboarding overview (balance, deposit addresses, commands) keeps a light
+brand touch in the header only — amounts and addresses stay plain.
 """
 
 from __future__ import annotations
@@ -13,6 +14,12 @@ from sqlalchemy import select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from fade.bot.handlers.common import (
+    GROUP_REDIRECT_TEXT,
+    dm_button,
+    format_balance,
+    format_deposit_lines,
+)
 from fade.db.models import User
 
 ATTEST_CALLBACK = "attest:accept"
@@ -27,11 +34,6 @@ ATTESTATION_TEXT = (
     "Tapping the button below records your acceptance."
 )
 
-WELCOME_BACK_TEXT = (
-    "You're already in. Paste a Polymarket link when trading goes live, "
-    "or /wallet to see your balance."
-)
-
 RESUME_SETUP_TEXT = (
     "Your acceptance is recorded but your wallet setup didn't finish. Tap below to complete it."
 )
@@ -43,20 +45,37 @@ CREATION_FAILED_TEXT = (
     "If this keeps happening, contact the operator."
 )
 
-WALLET_READY_TEXT = (
-    "Your wallet is ready.\n\n"
-    "Address: `{address}`\n\n"
-    "Use /wallet to see your balance and deposit instructions. "
-    "Funds in this wallet are controlled by your own signing key; "
-    "Fade's backend can place trades but cannot withdraw to an arbitrary address."
+OVERVIEW_HEADER_NEW = "⚔️ Welcome to Fade."
+OVERVIEW_HEADER_BACK = "⚔️ Welcome back to Fade."
+
+COMMANDS_TEXT = (
+    "Commands:\n"
+    "• /wallet — balance + deposit info\n"
+    "• /ping — check I'm alive\n\n"
+    "Trading, positions, and clan wars are coming soon. "
+    "Paste a Polymarket link the moment they go live."
 )
 
-GROUP_REDIRECT_TEXT = "Wallets are a DM thing. Tap below and we'll talk in private."
+OVERVIEW_TEXT = (
+    "{header}\n\n"
+    "💰 Balance: ${balance} (pUSD)\n\n"
+    "Deposit (send USDC, arrives as pUSD):\n"
+    "{deposit_lines}\n\n"
+    "Wallet: `{address}`\n\n"
+    "{commands}"
+)
 
 
-def _dm_button(bot_username: str, payload: str) -> InlineKeyboardMarkup:
-    url = f"https://t.me/{bot_username}?start={payload}"
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Open DM", url=url)]])
+async def _render_overview(wallets, telegram_user_id: int, address: str, header: str) -> str:
+    balance = await wallets.get_balance(telegram_user_id)
+    deposit_addresses = await wallets.get_deposit_addresses(telegram_user_id)
+    return OVERVIEW_TEXT.format(
+        header=header,
+        balance=format_balance(balance),
+        deposit_lines=format_deposit_lines(deposit_addresses),
+        address=address,
+        commands=COMMANDS_TEXT,
+    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -65,7 +84,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_chat is not None and update.effective_chat.type != "private":
         await update.message.reply_text(
             GROUP_REDIRECT_TEXT,
-            reply_markup=_dm_button(context.bot.username, "start"),
+            reply_markup=dm_button(context.bot.username, "start"),
         )
         return
 
@@ -79,7 +98,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Attested, but wallet creation may have failed midway: offer to resume.
         address = await wallets.get_wallet_address(update.effective_user.id)
         if address is not None:
-            await update.message.reply_text(WELCOME_BACK_TEXT)
+            text = await _render_overview(
+                wallets, update.effective_user.id, address, OVERVIEW_HEADER_BACK
+            )
+            await update.message.reply_text(text, parse_mode="Markdown")
             return
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton("Finish wallet setup", callback_data=ATTEST_CALLBACK)]]
@@ -125,4 +147,6 @@ async def attest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         await query.edit_message_text(CREATION_FAILED_TEXT, reply_markup=keyboard)
         return
-    await query.edit_message_text(WALLET_READY_TEXT.format(address=address), parse_mode="Markdown")
+
+    text = await _render_overview(wallets, tg_user.id, address, OVERVIEW_HEADER_NEW)
+    await query.edit_message_text(text, parse_mode="Markdown")

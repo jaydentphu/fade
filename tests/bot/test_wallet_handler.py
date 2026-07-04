@@ -60,7 +60,7 @@ async def test_wallet_in_dm_shows_address_balance_and_deposit_info():
     assert FAKE_ADDRESS in text
     assert "12.5" in text
     assert FAKE_EVM_DEPOSIT in text
-    assert "SVM" in text  # extra networks listed
+    assert "Solana" in text  # extra networks listed with friendly labels
 
 
 async def test_wallet_without_account_prompts_start():
