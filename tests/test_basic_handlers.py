@@ -1,6 +1,7 @@
 """Handler tests with mocked Update/Context per project testing rules.
 
-No test in this suite may hit a live network.
+No test in this suite may hit a live network. The old placeholder /start test
+moved to tests/bot/test_onboarding.py when real onboarding replaced it.
 """
 
 from __future__ import annotations
@@ -19,15 +20,6 @@ def make_update() -> Update:
     return update
 
 
-async def test_start_replies_with_welcome():
-    update = make_update()
-    context = MagicMock()
-
-    await basic.start(update, context)
-
-    update.message.reply_text.assert_awaited_once_with(basic.START_TEXT)
-
-
 async def test_ping_replies():
     update = make_update()
     context = MagicMock()
@@ -37,10 +29,9 @@ async def test_ping_replies():
     update.message.reply_text.assert_awaited_once_with(basic.PING_TEXT)
 
 
-async def test_handlers_ignore_updates_without_message():
+async def test_ping_ignores_updates_without_message():
     update = MagicMock(spec=Update)
     update.message = None
     context = MagicMock()
 
-    await basic.start(update, context)
     await basic.ping(update, context)

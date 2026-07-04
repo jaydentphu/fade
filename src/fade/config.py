@@ -7,24 +7,54 @@ module may log or expose secret values.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
+
+_SECRET_FIELDS = {"telegram_bot_token", "fade_signing_key", "relayer_api_key"}
 
 
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
     admin_user_id: int
+    database_url: str
+    signing_database_url: str
+    fade_signing_key: str
+    relayer_api_key: str
+    relayer_api_key_address: str
+    builder_code: str
+    polygon_rpc_url: str = "https://1rpc.io/matic"
+    attestation_version: str = field(default="2026-07-04")
 
-    def __repr__(self) -> str:  # keep the token out of logs and tracebacks
-        return f"Settings(admin_user_id={self.admin_user_id}, telegram_bot_token=***)"
+    def __repr__(self) -> str:  # keep secrets out of logs and tracebacks
+        shown = {
+            name: ("***" if name in _SECRET_FIELDS else getattr(self, name))
+            for name in self.__dataclass_fields__
+        }
+        inner = ", ".join(f"{k}={v!r}" for k, v in shown.items())
+        return f"Settings({inner})"
+
+
+def _require(name: str) -> str:
+    value = os.environ.get(name, "")
+    if not value:
+        raise RuntimeError(f"{name} is not set. Copy .env.example to .env and fill it.")
+    return value
 
 
 def load_settings() -> Settings:
     load_dotenv()
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    if not token:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set. Copy .env.example to .env and fill it.")
-    admin_raw = os.environ.get("FADE_ADMIN_USER_ID", "0")
-    return Settings(telegram_bot_token=token, admin_user_id=int(admin_raw))
+    return Settings(
+        telegram_bot_token=_require("TELEGRAM_BOT_TOKEN"),
+        admin_user_id=int(os.environ.get("FADE_ADMIN_USER_ID", "0")),
+        database_url=os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///fade_dev.db"),
+        signing_database_url=os.environ.get(
+            "SIGNING_DATABASE_URL", "sqlite+aiosqlite:///signing_dev.db"
+        ),
+        fade_signing_key=_require("FADE_SIGNING_KEY"),
+        relayer_api_key=_require("RELAYER_API_KEY"),
+        relayer_api_key_address=_require("RELAYER_API_KEY_ADDRESS"),
+        builder_code=_require("FADE_BUILDER_CODE"),
+        polygon_rpc_url=os.environ.get("POLYGON_RPC_URL", "https://1rpc.io/matic"),
+    )
