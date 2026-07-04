@@ -6,6 +6,7 @@ precise, no jokes.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -31,7 +32,16 @@ WELCOME_BACK_TEXT = (
     "or /wallet to see your balance."
 )
 
+RESUME_SETUP_TEXT = (
+    "Your acceptance is recorded but your wallet setup didn't finish. Tap below to complete it."
+)
+
 CREATING_TEXT = "Setting up your wallet. This takes a few seconds."
+
+CREATION_FAILED_TEXT = (
+    "Wallet setup failed. Nothing was lost — tap below to try again. "
+    "If this keeps happening, contact the operator."
+)
 
 WALLET_READY_TEXT = (
     "Your wallet is ready.\n\n"
@@ -60,12 +70,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     sessions = context.application.bot_data["sessions"]
+    wallets = context.application.bot_data["wallets"]
     async with sessions() as session:
         user = await session.scalar(
             select(User).where(User.telegram_user_id == update.effective_user.id)
         )
     if user is not None and user.onboarded:
-        await update.message.reply_text(WELCOME_BACK_TEXT)
+        # Attested, but wallet creation may have failed midway: offer to resume.
+        address = await wallets.get_wallet_address(update.effective_user.id)
+        if address is not None:
+            await update.message.reply_text(WELCOME_BACK_TEXT)
+            return
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Finish wallet setup", callback_data=ATTEST_CALLBACK)]]
+        )
+        await update.message.reply_text(RESUME_SETUP_TEXT, reply_markup=keyboard)
         return
 
     keyboard = InlineKeyboardMarkup(
@@ -97,5 +116,13 @@ async def attest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await session.commit()
 
     await query.edit_message_text(CREATING_TEXT)
-    address = await wallets.create_wallet(tg_user.id)
+    try:
+        address = await wallets.create_wallet(tg_user.id)
+    except Exception:
+        logging.getLogger(__name__).exception("Wallet creation failed for user %s", tg_user.id)
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Try again", callback_data=ATTEST_CALLBACK)]]
+        )
+        await query.edit_message_text(CREATION_FAILED_TEXT, reply_markup=keyboard)
+        return
     await query.edit_message_text(WALLET_READY_TEXT.format(address=address), parse_mode="Markdown")

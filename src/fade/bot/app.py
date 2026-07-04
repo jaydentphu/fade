@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler
+import logging
+
+from telegram import Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from fade.bot.handlers import basic, deposits, onboarding, wallet
 from fade.config import Settings
@@ -8,6 +11,17 @@ from fade.db.session import make_engine, make_session_factory
 from fade.wallets import WalletService
 
 DEPOSIT_SCAN_INTERVAL_S = 30
+
+logger = logging.getLogger(__name__)
+
+
+async def _log_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Exceptions from Polymarket/SDK never contain key material (only addresses),
+    # so logging the traceback is safe. Update contents are not logged.
+    user_id = (
+        update.effective_user.id if isinstance(update, Update) and update.effective_user else None
+    )
+    logger.error("Unhandled error (user=%s)", user_id, exc_info=context.error)
 
 
 def build_application(settings: Settings) -> Application:
@@ -28,6 +42,8 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(
         CallbackQueryHandler(onboarding.attest_callback, pattern=f"^{onboarding.ATTEST_CALLBACK}$")
     )
+
+    app.add_error_handler(_log_error)
 
     if app.job_queue is not None:
         app.job_queue.run_repeating(deposits.scan_job, interval=DEPOSIT_SCAN_INTERVAL_S, first=10)

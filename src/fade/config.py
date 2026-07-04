@@ -11,7 +11,14 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
-_SECRET_FIELDS = {"telegram_bot_token", "fade_signing_key", "relayer_api_key"}
+_SECRET_FIELDS = {
+    "telegram_bot_token",
+    "fade_signing_key",
+    "relayer_api_key",
+    "builder_api_key",
+    "builder_api_secret",
+    "builder_api_passphrase",
+}
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,11 @@ class Settings:
     relayer_api_key: str
     relayer_api_key_address: str
     builder_code: str
+    # Builder API key (HMAC triple): required to relay transactions on behalf of
+    # OTHER users' signers. The Relayer API key above only covers our own address.
+    builder_api_key: str = ""
+    builder_api_secret: str = ""
+    builder_api_passphrase: str = ""
     polygon_rpc_url: str = "https://1rpc.io/matic"
     attestation_version: str = field(default="2026-07-04")
 
@@ -56,5 +68,8 @@ def load_settings() -> Settings:
         relayer_api_key=_require("RELAYER_API_KEY"),
         relayer_api_key_address=_require("RELAYER_API_KEY_ADDRESS"),
         builder_code=_require("FADE_BUILDER_CODE"),
+        builder_api_key=os.environ.get("FADE_BUILDER_API_KEY", ""),
+        builder_api_secret=os.environ.get("FADE_BUILDER_API_SECRET", ""),
+        builder_api_passphrase=os.environ.get("FADE_BUILDER_API_PASSPHRASE", ""),
         polygon_rpc_url=os.environ.get("POLYGON_RPC_URL", "https://1rpc.io/matic"),
     )

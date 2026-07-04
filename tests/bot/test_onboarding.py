@@ -13,11 +13,12 @@ from fade.db.models import User
 FAKE_ADDRESS = "0xFadE0000000000000000000000000000000000aa"
 
 
-def make_context(settings, session_factory) -> MagicMock:
+def make_context(settings, session_factory, has_wallet: bool = True) -> MagicMock:
     context = MagicMock()
     context.bot.username = "fadetest_bot"
     wallets = MagicMock()
     wallets.create_wallet = AsyncMock(return_value=FAKE_ADDRESS)
+    wallets.get_wallet_address = AsyncMock(return_value=FAKE_ADDRESS if has_wallet else None)
     context.application.bot_data = {
         "settings": settings,
         "sessions": session_factory,
@@ -90,3 +91,45 @@ async def test_start_after_onboarding_welcomes_back(settings, session_factory):
     update2 = make_update()
     await onboarding.start(update2, context)
     assert update2.message.reply_text.call_args.args[0] == onboarding.WELCOME_BACK_TEXT
+
+
+async def test_start_offers_resume_when_wallet_creation_did_not_finish(settings, session_factory):
+    # Attest with a failing wallet service: attestation persists, wallet doesn't.
+    update = make_update()
+    update.callback_query = MagicMock()
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_text = AsyncMock()
+    context = make_context(settings, session_factory, has_wallet=False)
+    context.application.bot_data["wallets"].create_wallet = AsyncMock(
+        side_effect=RuntimeError("relayer rejected")
+    )
+
+    await onboarding.attest_callback(update, context)
+
+    # The failure is surfaced with a retry button, not a dead end.
+    text = update.callback_query.edit_message_text.call_args.args[0]
+    assert text == onboarding.CREATION_FAILED_TEXT
+    markup = update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
+    assert markup.inline_keyboard[0][0].callback_data == onboarding.ATTEST_CALLBACK
+
+    # And /start now offers to finish setup instead of claiming success.
+    update2 = make_update()
+    await onboarding.start(update2, context)
+    assert update2.message.reply_text.call_args.args[0] == onboarding.RESUME_SETUP_TEXT
+
+
+async def test_retry_after_failure_completes_wallet_setup(settings, session_factory):
+    update = make_update()
+    update.callback_query = MagicMock()
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_text = AsyncMock()
+    context = make_context(settings, session_factory, has_wallet=False)
+    context.application.bot_data["wallets"].create_wallet = AsyncMock(
+        side_effect=[RuntimeError("relayer rejected"), FAKE_ADDRESS]
+    )
+
+    await onboarding.attest_callback(update, context)  # fails
+    await onboarding.attest_callback(update, context)  # retry succeeds
+
+    final_text = update.callback_query.edit_message_text.call_args.args[0]
+    assert FAKE_ADDRESS in final_text
