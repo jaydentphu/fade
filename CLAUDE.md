@@ -5,7 +5,7 @@ Telegram bot for social trading on Polymarket. Full spec: docs/PRD.md. Read it b
 ## Stack (do not substitute without asking)
 - Python 3.11+, managed with uv
 - python-telegram-bot (v21+, async) for the bot layer, webhook mode in prod, polling in dev
-- py-clob-client for Polymarket CLOB, web3.py for chain reads
+- polymarket-client (official py-sdk, beta) for Polymarket CLOB — py-clob-client is archived/dead, see docs/SPIKE-NOTES.md; web3.py or plain JSON-RPC for chain reads
 - SQLAlchemy 2.x + Alembic; SQLite for dev/tests, Postgres in prod
 - pytest + pytest-asyncio; ruff for lint/format
 - FastAPI only as the webhook receiver, no other web surface

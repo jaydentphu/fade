@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "python-telegram-bot>=21.0",
     "python-dotenv>=1.0",
+    "polymarket-client>=0.1.0b13",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]
