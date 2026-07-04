@@ -50,10 +50,15 @@ OVERVIEW_HEADER_BACK = "⚔️ Welcome back to Fade."
 
 COMMANDS_TEXT = (
     "Commands:\n"
+    "• Paste a Polymarket link — get a market card, tap to trade\n"
+    "• /positions — your open positions, one-tap sell\n"
+    "• /withdraw — cash out to any address\n"
     "• /wallet — balance + deposit info\n"
+    "• /trending — what's hot right now\n"
+    "• /search <term> — find a specific market\n"
+    "• /export — export your private key (only if you know why you'd need to)\n"
     "• /ping — check I'm alive\n\n"
-    "Trading, positions, and clan wars are coming soon. "
-    "Paste a Polymarket link the moment they go live."
+    "Clan wars are coming soon."
 )
 
 OVERVIEW_TEXT = (
