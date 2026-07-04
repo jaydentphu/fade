@@ -65,6 +65,49 @@ class Deposit(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Order(Base):
+    """One order attempt. The unique telegram_update_id is the idempotency
+    barrier: a webhook retry re-delivers the same update_id, the insert
+    conflicts, and the trade is not executed twice (PRD §6)."""
+
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True
+    )
+    telegram_update_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    token_id: Mapped[str] = mapped_column(String(80))
+    market_title: Mapped[str] = mapped_column(String(200))
+    side: Mapped[str] = mapped_column(String(4))  # BUY | SELL
+    amount: Mapped[Decimal] = mapped_column(Numeric(20, 6))  # USDC for BUY, shares for SELL
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    # pending | filled | rejected | failed
+    clob_order_id: Mapped[str | None] = mapped_column(String(80))
+    fill_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    fill_shares: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    fill_usdc: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    fee: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    error: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WithdrawalAddress(Base):
+    """Destination addresses a user has explicitly confirmed (PRD F-4)."""
+
+    __tablename__ = "withdrawal_addresses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True
+    )
+    address: Mapped[str] = mapped_column(String(42))
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ChainScanState(Base):
     """Singleton watermark for the deposit scanner (row id is always 1)."""
 

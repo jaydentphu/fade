@@ -19,6 +19,19 @@ _NETWORK_LABELS = {
 }
 
 
+def sanitize(text: str, limit: int = 120) -> str:
+    """Neutralize untrusted text (market titles, usernames) before rendering.
+
+    Strips characters that alter Markdown parsing or look like commands, and
+    truncates. PRD §7.6: untrusted input must never alter rendering/parsing.
+    """
+    cleaned = (text or "").replace("\n", " ").strip()
+    for ch in ("\\", "`", "*", "_", "[", "]"):
+        cleaned = cleaned.replace(ch, "")
+    cleaned = cleaned.lstrip("/")
+    return cleaned[:limit] + ("…" if len(cleaned) > limit else "")
+
+
 def dm_button(bot_username: str, payload: str) -> InlineKeyboardMarkup:
     url = f"https://t.me/{bot_username}?start={payload}"
     return InlineKeyboardMarkup([[InlineKeyboardButton("Open DM", url=url)]])

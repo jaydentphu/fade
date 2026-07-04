@@ -3,11 +3,31 @@ from __future__ import annotations
 import logging
 
 from telegram import Update
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-from fade.bot.handlers import basic, deposits, onboarding, wallet
+from fade.bot.handlers import (
+    admin,
+    basic,
+    deposits,
+    discover,
+    export,
+    onboarding,
+    positions,
+    router,
+    trade,
+    wallet,
+    withdraw,
+)
 from fade.config import Settings
 from fade.db.session import make_engine, make_session_factory
+from fade.trading.service import TradingService
 from fade.wallets import WalletService
 
 DEPOSIT_SCAN_INTERVAL_S = 30
@@ -29,18 +49,47 @@ def build_application(settings: Settings) -> Application:
 
     engine = make_engine(settings.database_url)
     sessions = make_session_factory(engine)
+    wallets = WalletService(settings, sessions)
     app.bot_data["settings"] = settings
     app.bot_data["sessions"] = sessions
-    app.bot_data["wallets"] = WalletService(settings, sessions)
+    app.bot_data["wallets"] = wallets
+    app.bot_data["trading"] = TradingService(settings, sessions, wallets)
     app.bot_data["deposit_scanner"] = deposits.DepositScanner(
         deposits.Rpc(settings.polygon_rpc_url), sessions
     )
 
+    # Commands
     app.add_handler(CommandHandler("start", onboarding.start))
     app.add_handler(CommandHandler("wallet", wallet.wallet))
+    app.add_handler(CommandHandler("positions", positions.positions))
+    app.add_handler(CommandHandler("withdraw", withdraw.withdraw))
+    app.add_handler(CommandHandler("export", export.export))
+    app.add_handler(CommandHandler("trending", discover.trending))
+    app.add_handler(CommandHandler("search", discover.search))
+    app.add_handler(CommandHandler("pause", admin.pause))
+    app.add_handler(CommandHandler("resume", admin.resume))
     app.add_handler(CommandHandler("ping", basic.ping))
+
+    # Callback queries
     app.add_handler(
         CallbackQueryHandler(onboarding.attest_callback, pattern=f"^{onboarding.ATTEST_CALLBACK}$")
+    )
+    app.add_handler(CallbackQueryHandler(trade.size_callback, pattern="^t:"))
+    app.add_handler(CallbackQueryHandler(trade.confirm_callback, pattern="^tc:"))
+    app.add_handler(CallbackQueryHandler(trade.cancel_callback, pattern="^tx$"))
+    app.add_handler(CallbackQueryHandler(positions.sell_callback, pattern="^ps:"))
+    app.add_handler(CallbackQueryHandler(positions.sell_confirm_callback, pattern="^psc:"))
+    app.add_handler(CallbackQueryHandler(withdraw.confirm_callback, pattern="^wd:"))
+    app.add_handler(
+        CallbackQueryHandler(export.export_callback, pattern=f"^{export.EXPORT_CALLBACK}$")
+    )
+    app.add_handler(CallbackQueryHandler(discover.view_callback, pattern="^v:"))
+
+    # Free text in DMs: pasted URLs and flow replies
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, router.handle_text
+        )
     )
 
     app.add_error_handler(_log_error)

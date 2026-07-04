@@ -32,3 +32,24 @@ async def session_factory(settings):
         await conn.run_sync(Base.metadata.create_all)
     yield async_sessionmaker(engine, expire_on_commit=False)
     await engine.dispose()
+
+
+@pytest.fixture
+def onboard(session_factory):
+    """Callable fixture: insert a user who has accepted the attestation gate."""
+    from datetime import UTC, datetime
+
+    from fade.db.models import User
+
+    async def _onboard(telegram_user_id: int) -> None:
+        async with session_factory() as session:
+            session.add(
+                User(
+                    telegram_user_id=telegram_user_id,
+                    attestation_accepted_at=datetime.now(UTC),
+                    attestation_version="test",
+                )
+            )
+            await session.commit()
+
+    return _onboard
