@@ -17,7 +17,8 @@ from fade.bot.handlers.common import sanitize
 from fade.db.models import User
 from fade.trading.markets import MarketCard, MarketLookupError
 
-PRESET_SIZES = ("10", "25", "50")
+PRESET_SIZES = ("10", "25", "50", "100", "250")
+BUTTONS_PER_ROW = 3
 MIN_ORDER_USD = Decimal("1")
 MAX_ORDER_USD = Decimal("1000")
 
@@ -75,18 +76,26 @@ def render_card_text(card: MarketCard) -> str:
     return f"{sanitize(card.question)}\n\nYES {yes} · NO {no}{ends}"
 
 
-def card_keyboard(key: str) -> InlineKeyboardMarkup:
-    def row(side_letter: str, label: str) -> list[InlineKeyboardButton]:
-        buttons = [
-            InlineKeyboardButton(f"{label} ${size}", callback_data=f"t:{key}:{side_letter}:{size}")
-            for size in PRESET_SIZES
-        ]
-        buttons.append(
-            InlineKeyboardButton(f"{label} custom", callback_data=f"t:{key}:{side_letter}:c")
-        )
-        return buttons
+def _side_buttons(key: str, side_letter: str, prefix: str) -> list[list[InlineKeyboardButton]]:
+    """Amount buttons for one side, chunked so labels never truncate.
 
-    return InlineKeyboardMarkup([row("y", "Buy YES"), row("n", "Buy NO")])
+    Short labels ("YES $10") 3-per-row stay fully visible on a phone, unlike
+    the old 4-wide "Buy YES $10" that Telegram cut to "Buy YE...".
+    """
+    buttons = [
+        InlineKeyboardButton(f"{prefix} ${size}", callback_data=f"t:{key}:{side_letter}:{size}")
+        for size in PRESET_SIZES
+    ]
+    buttons.append(
+        InlineKeyboardButton(f"{prefix} custom", callback_data=f"t:{key}:{side_letter}:c")
+    )
+    return [buttons[i : i + BUTTONS_PER_ROW] for i in range(0, len(buttons), BUTTONS_PER_ROW)]
+
+
+def card_keyboard(key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        _side_buttons(key, "y", "🟢 YES") + _side_buttons(key, "n", "🔴 NO")
+    )
 
 
 async def show_market_card(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str) -> None:

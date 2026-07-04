@@ -96,4 +96,4 @@ async def test_view_callback_swaps_in_tradeable_card():
     assert "Will it rain tomorrow?" in text
     markup = update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
     labels = [b.text for row in markup.inline_keyboard for b in row]
-    assert "Buy YES $10" in labels and "Buy NO custom" in labels
+    assert "🟢 YES $10" in labels and "🔴 NO custom" in labels

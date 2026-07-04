@@ -78,7 +78,7 @@ def make_callback_update(data: str, update_id: int = 6000) -> MagicMock:
 async def test_pasting_url_yields_market_card_with_buy_buttons_and_sizes(
     settings, session_factory, onboard
 ):
-    """PRD F-8: URL -> card with Buy YES / Buy NO and $10/$25/$50/custom."""
+    """PRD F-8: URL -> card with Buy YES / Buy NO and preset + custom sizes."""
     await onboard(USER_ID)
     update = make_message_update("https://polymarket.com/event/will-it-rain")
     context = make_context(settings, session_factory)
@@ -91,16 +91,22 @@ async def test_pasting_url_yields_market_card_with_buy_buttons_and_sizes(
 
     markup = update.message.reply_text.call_args.kwargs["reply_markup"]
     labels = [button.text for row in markup.inline_keyboard for button in row]
-    assert labels == [
-        "Buy YES $10",
-        "Buy YES $25",
-        "Buy YES $50",
-        "Buy YES custom",
-        "Buy NO $10",
-        "Buy NO $25",
-        "Buy NO $50",
-        "Buy NO custom",
-    ]
+    # Every preset size appears for both sides, plus a custom option each.
+    for size in trade.PRESET_SIZES:
+        assert f"🟢 YES ${size}" in labels
+        assert f"🔴 NO ${size}" in labels
+    assert "🟢 YES custom" in labels
+    assert "🔴 NO custom" in labels
+
+    # No label is truncated: rows are at most 3 buttons wide, and labels are short.
+    assert all(len(row) <= trade.BUTTONS_PER_ROW for row in markup.inline_keyboard)
+    assert all(len(label) <= 12 for label in labels)
+
+    # The $10 YES button still drives the buy flow with the right callback.
+    yes_ten = next(
+        button for row in markup.inline_keyboard for button in row if button.text == "🟢 YES $10"
+    )
+    assert yes_ten.callback_data.endswith(":y:10")
 
 
 async def test_attestation_gate_blocks_trading_until_accepted(settings, session_factory, onboard):
