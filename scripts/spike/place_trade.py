@@ -11,6 +11,8 @@ Required environment (shell env or .env — .env is gitignored):
     FADE_BUILDER_CODE        the Fade builder code (public bytes32)
 Optional:
     POLYMARKET_WALLET        funds wallet to act for; defaults to the signer's deposit wallet
+    RELAYER_API_KEY          from polymarket.com Settings > API Keys; needed to auto-deploy
+    RELAYER_API_KEY_ADDRESS  a fresh signer's deposit wallet via the gasless Relayer
 
 The builder code is attached to both orders; the SDK serializes it into the signed
 order's `builder` field, which is how Polymarket attributes volume and fees to Fade.
@@ -26,6 +28,7 @@ from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
 from dotenv import load_dotenv
 from polymarket import PublicClient, SecureClient
+from polymarket.auth import RelayerApiKey
 from polymarket.errors import UnexpectedResponseError
 from polymarket.models.clob import AcceptedOrder, RejectedOrder
 
@@ -81,6 +84,19 @@ def main() -> None:
     wallet = os.environ.get("POLYMARKET_WALLET") or None
     slip = args.slippage / Decimal(100)
 
+    relayer_key = os.environ.get("RELAYER_API_KEY")
+    relayer_address = os.environ.get("RELAYER_API_KEY_ADDRESS")
+    api_key = (
+        RelayerApiKey(key=relayer_key, address=relayer_address)
+        if relayer_key and relayer_address
+        else None
+    )
+    if api_key is None:
+        print(
+            "No RELAYER_API_KEY/RELAYER_API_KEY_ADDRESS set — a brand-new signer with "
+            "no deployed wallet will fail. Set both, or pass --wallet an existing one."
+        )
+
     with PublicClient() as public:
         try:
             market = public.get_market(url=args.url)
@@ -101,7 +117,7 @@ def main() -> None:
             raise SystemExit(0)
 
     print("Authenticating with the CLOB (derives API credentials; key stays in memory)...")
-    with SecureClient.create(private_key=private_key, wallet=wallet) as client:
+    with SecureClient.create(private_key=private_key, wallet=wallet, api_key=api_key) as client:
         rates = client.get_builder_fee_rates(builder_code)
         print(f"Builder fee rates for this code: taker={rates.taker} maker={rates.maker}")
 

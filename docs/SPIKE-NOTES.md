@@ -102,11 +102,66 @@ Findings from 2026-07-03, verified against live docs and the installed SDK sourc
 `place_trade.py` refuses amounts > $5, prompts for confirmation, prints fills with
 polygonscan links, and never prints key material.
 
-## 8. Open items for Phase 1
+## 8. Deposit-wallet deployment requires a Relayer API key (confirmed 2026-07-03)
 
-- **Per-user wallets:** the SDK has relayer models and gasless workflows via
-  `api_key=`; the exact Safe-deployment flow for creating OUR users' wallets still
-  needs a spike against the Relayer API (needs a Relayer API key from the builder
-  dashboard).
+- Running `place_trade.py` with a brand-new signer (no prior Polymarket account)
+  failed: `SecureClient.create()` computes a deterministic deposit-wallet address
+  (`derive_beacon_deposit_wallet_address(signer.address, ...)`), sees it isn't
+  deployed on-chain, and tries to auto-deploy it via the gasless Relayer — which
+  raised `Gasless transactions require a Builder API Key or Relayer API Key.`
+- This is the crux of Phase 1's wallet flow: **Fade users won't have existing
+  Polymarket accounts**, so every `/start` needs the backend to auto-deploy a fresh
+  deposit wallet server-side. A human logging into polymarket.com once bypasses this
+  (existing Safe/proxy wallets skip deployment entirely), but that defeats the
+  "never leave Telegram" product requirement — not viable for real users.
+- **Fix:** pass `api_key=` to `SecureClient.create()`. `polymarket.auth.ApiKey` is
+  `BuilderApiKey | RelayerApiKey`. We're using `RelayerApiKey(key=..., address=...)`
+  — a UUID key + the Ethereum address of whoever owns the key (not per-user; traced
+  in `_internal/actions/relayer/auth.py`, it sends static `RELAYER_API_KEY` /
+  `RELAYER_API_KEY_ADDRESS` headers on every relayer request regardless of which
+  user's wallet is being deployed). It's a backend-level credential like the
+  Telegram bot token, not a per-trade secret — stored in `.env` as
+  `RELAYER_API_KEY` / `RELAYER_API_KEY_ADDRESS`, obtained from
+  polymarket.com Settings > API Keys (requires a one-time human dashboard login,
+  done once by the builder, not per user).
+- `place_trade.py` now builds this into `api_key=` when both env vars are set.
+- Still needs a live end-to-end run: Jayden supplies a **fresh, never-shared**
+  private key via his own shell env (never through chat — an earlier key was pasted
+  into chat and must be treated as burned) to confirm auto-deployment + trade +
+  builder attribution all work together.
+
+## 9. pUSD and the bridge: how deposits/withdrawals actually work (confirmed 2026-07-03)
+
+- **Deposit wallets do not hold USDC. They hold pUSD**, Polymarket's collateral token
+  (`PRODUCTION.collateral_token = 0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB`).
+  The PRD's "deposit USDC to your Safe address" mental model is one generation old.
+- **Deposits:** `POST https://bridge.polymarket.com/deposit {address}` returns
+  personal bridge addresses (`evm`, `svm`, `btc`). User sends USDC (or other
+  supported assets — see `/supported-assets`) to their bridge address on any
+  supported chain; it arrives as pUSD in the deposit wallet. **This gives Fade
+  cross-chain deposits (PRD F-6) almost for free, including Solana and Bitcoin.**
+- **Withdrawals:** `POST /withdraw {address, toChainId, toTokenAddress,
+  recipientAddr}` returns a bridge address; transfer pUSD to it (gasless via
+  `client.transfer_erc20`, needs the Relayer API key) and the bridge delivers the
+  destination token to the recipient. Withdrawal = 2 steps: bridge request + pUSD
+  transfer.
+- Bridge endpoints take an optional `X-Builder-Code` header for attribution — set it.
+- Balance check: `client.get_balance_allowance(asset_type="COLLATERAL")`, base units.
+- Deposit detection must watch **pUSD** transfers into the deposit wallet (bridge
+  delivers pUSD), not just USDC — `watch_deposits.py` updated accordingly.
+- **Geoblock scope:** trading (order placement) is geoblocked by IP in close-only
+  regions (incl. US); the geoblock doc says close-only still allows closing/selling,
+  and withdrawals/deposits are wallet operations, not CLOB orders. Round-trip test
+  should work from Jayden's location; the live BUY cannot.
+- `wallet_round_trip.py` implements: `info` (wallet + pUSD balance),
+  `deposit-address` (personal bridge addresses), `withdraw` (bridge request +
+  gasless pUSD transfer with confirm step).
+
+## 10. Open items for Phase 1
+
+- **Wallets module:** build `/start` → generate per-user signer, call
+  `SecureClient.create(private_key=..., api_key=<Fade's RelayerApiKey>)` to
+  auto-deploy their deposit wallet, store signing credentials behind the
+  `wallets/` signing interface (never in the app DB in plaintext, per CLAUDE.md).
 - Native-USDC deposits need a swap/convert decision.
 - Verify builder attribution actually credits after the first real trade (task 3 run).
