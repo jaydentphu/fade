@@ -34,6 +34,57 @@ async def session_factory(settings):
     await engine.dispose()
 
 
+class SharedFakeClobClient:
+    """Fake CLOB client for Phase 3 hardening tests. No network, ever."""
+
+    def __init__(self) -> None:
+        self.placed: list[dict] = []
+
+    async def estimate_market_price(self, **kwargs):
+        from decimal import Decimal
+
+        return Decimal("0.50")
+
+    async def place_market_order(self, **kwargs):
+        from decimal import Decimal
+        from types import SimpleNamespace
+
+        self.placed.append(kwargs)
+        if kwargs["side"] == "BUY":
+            return SimpleNamespace(
+                ok=True, making_amount=Decimal("10"), taking_amount=Decimal("20")
+            )
+        return SimpleNamespace(ok=True, making_amount=Decimal("20"), taking_amount=Decimal("9.8"))
+
+    async def get_builder_fee_rates(self, code: str):
+        from decimal import Decimal
+        from types import SimpleNamespace
+
+        return SimpleNamespace(taker=Decimal("0.01"), maker=Decimal("0"))
+
+    async def get_balance_allowance(self, *, asset_type: str):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(balance=90_000_000)
+
+
+@pytest.fixture
+def real_trading(settings, session_factory):
+    """A REAL TradingService over a fake CLOB client (for handler-level audits)."""
+    from contextlib import asynccontextmanager
+
+    from fade.trading.service import TradingService
+
+    clob = SharedFakeClobClient()
+
+    class FakeWallets:
+        @asynccontextmanager
+        async def secure_client(self, telegram_user_id: int):
+            yield clob
+
+    return TradingService(settings, session_factory, FakeWallets()), clob
+
+
 @pytest.fixture
 def onboard(session_factory):
     """Callable fixture: insert a user who has accepted the attestation gate."""

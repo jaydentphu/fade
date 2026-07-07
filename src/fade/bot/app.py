@@ -22,6 +22,7 @@ from fade.bot.handlers import (
     onboarding,
     positions,
     router,
+    security,
     trade,
     wallet,
     withdraw,
@@ -78,6 +79,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("join", clan.join))
     app.add_handler(CommandHandler("privacy", clan.privacy))
     app.add_handler(CommandHandler("leaderboard", clan.leaderboard))
+    app.add_handler(CommandHandler("security", security.security))
     app.add_handler(CommandHandler("pause", admin.pause))
     app.add_handler(CommandHandler("resume", admin.resume))
     app.add_handler(CommandHandler("ping", basic.ping))
