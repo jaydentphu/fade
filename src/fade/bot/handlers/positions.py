@@ -125,3 +125,21 @@ async def sell_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
         amount=Decimal(view.shares),
     )
     await render_result(query, result, f"Sold {view.outcome}", view.title)
+
+    if result.status == "filled":
+        # Late import: clan imports helpers from the trade module family.
+        from fade.bot.handlers.clan import broadcast_fill
+
+        user = update.effective_user
+        await broadcast_fill(
+            context,
+            telegram_user_id=user.id,
+            username=user.username or user.first_name,
+            question=view.title,
+            side_label=view.outcome.upper(),
+            yes_token="",
+            no_token="",
+            amount_usdc=result.fill_usdc,
+            price=result.fill_price,
+            is_sell=True,
+        )

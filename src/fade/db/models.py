@@ -25,6 +25,8 @@ class User(Base):
     attestation_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attestation_version: Mapped[str | None] = mapped_column(String(32))
     slippage_bps: Mapped[int] = mapped_column(Integer, default=200)
+    # PRD F-17 privacy toggle: hide dollar amounts in group broadcasts.
+    hide_amounts: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     wallet: Mapped[Wallet | None] = relationship(back_populates="user")
@@ -106,6 +108,29 @@ class WithdrawalAddress(Base):
     confirmed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class Clan(Base):
+    """A group chat registered via /setup (PRD F-16)."""
+
+    __tablename__ = "clans"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    title: Mapped[str] = mapped_column(String(128))
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClanMember(Base):
+    """Membership observed from group activity (/setup, /join, fade/copy taps)."""
+
+    __tablename__ = "clan_members"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clans.chat_id"), primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), primary_key=True
+    )
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ChainScanState(Base):

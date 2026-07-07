@@ -15,6 +15,7 @@ from telegram.ext import (
 from fade.bot.handlers import (
     admin,
     basic,
+    clan,
     deposits,
     discover,
     export,
@@ -27,10 +28,12 @@ from fade.bot.handlers import (
 )
 from fade.config import Settings
 from fade.db.session import make_engine, make_session_factory
+from fade.social.broadcast import BroadcastQueue
 from fade.trading.service import TradingService
 from fade.wallets import WalletService
 
 DEPOSIT_SCAN_INTERVAL_S = 30
+BROADCAST_DRAIN_INTERVAL_S = 3
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,10 @@ async def _log_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None
         update.effective_user.id if isinstance(update, Update) and update.effective_user else None
     )
     logger.error("Unhandled error (user=%s)", user_id, exc_info=context.error)
+
+
+async def _broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await context.application.bot_data["broadcasts"].drain_once()
 
 
 def build_application(settings: Settings) -> Application:
@@ -57,6 +64,7 @@ def build_application(settings: Settings) -> Application:
     app.bot_data["deposit_scanner"] = deposits.DepositScanner(
         deposits.Rpc(settings.polygon_rpc_url), sessions
     )
+    app.bot_data["broadcasts"] = BroadcastQueue(send=app.bot.send_message)
 
     # Commands
     app.add_handler(CommandHandler("start", onboarding.start))
@@ -66,6 +74,10 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("export", export.export))
     app.add_handler(CommandHandler("trending", discover.trending))
     app.add_handler(CommandHandler("search", discover.search))
+    app.add_handler(CommandHandler("setup", clan.setup))
+    app.add_handler(CommandHandler("join", clan.join))
+    app.add_handler(CommandHandler("privacy", clan.privacy))
+    app.add_handler(CommandHandler("leaderboard", clan.leaderboard))
     app.add_handler(CommandHandler("pause", admin.pause))
     app.add_handler(CommandHandler("resume", admin.resume))
     app.add_handler(CommandHandler("ping", basic.ping))
@@ -84,6 +96,11 @@ def build_application(settings: Settings) -> Application:
         CallbackQueryHandler(export.export_callback, pattern=f"^{export.EXPORT_CALLBACK}$")
     )
     app.add_handler(CallbackQueryHandler(discover.view_callback, pattern="^v:"))
+    # Clan copy/fade loop
+    app.add_handler(CallbackQueryHandler(clan.fade_copy_callback, pattern="^(fd|cp):"))
+    app.add_handler(CallbackQueryHandler(clan.size_callback, pattern="^s[fc]:"))
+    app.add_handler(CallbackQueryHandler(clan.confirm_callback, pattern="^gc:"))
+    app.add_handler(CallbackQueryHandler(clan.cancel_callback, pattern="^gx:"))
 
     # Free text in DMs: pasted URLs and flow replies
     app.add_handler(
@@ -96,4 +113,7 @@ def build_application(settings: Settings) -> Application:
 
     if app.job_queue is not None:
         app.job_queue.run_repeating(deposits.scan_job, interval=DEPOSIT_SCAN_INTERVAL_S, first=10)
+        app.job_queue.run_repeating(
+            _broadcast_job, interval=BROADCAST_DRAIN_INTERVAL_S, first=BROADCAST_DRAIN_INTERVAL_S
+        )
     return app

@@ -217,6 +217,23 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     await render_result(query, result, action, card.question)
 
+    if result.status == "filled":
+        # Late import: clan imports helpers from this module.
+        from fade.bot.handlers.clan import broadcast_fill
+
+        user = update.effective_user
+        await broadcast_fill(
+            context,
+            telegram_user_id=user.id,
+            username=user.username or user.first_name,
+            question=card.question,
+            side_label="YES" if side_letter == "y" else "NO",
+            yes_token=card.yes_token,
+            no_token=card.no_token,
+            amount_usdc=result.fill_usdc,
+            price=result.fill_price,
+        )
+
 
 async def render_result(query, result, action: str, question: str) -> None:
     if result.status == "filled":

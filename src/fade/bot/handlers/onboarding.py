@@ -58,7 +58,9 @@ COMMANDS_TEXT = (
     "• /search <term> — find a specific market\n"
     "• /export — export your private key (only if you know why you'd need to)\n"
     "• /ping — check I'm alive\n\n"
-    "Clan wars are coming soon."
+    "In a group: /setup registers the clan, /join enlists you, /leaderboard "
+    "settles arguments. Every member's trade posts with ⚔️ Fade and 📋 Copy "
+    "buttons. /privacy hides your sizes."
 )
 
 OVERVIEW_TEXT = (
