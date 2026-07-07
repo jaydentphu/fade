@@ -71,3 +71,10 @@ Builder fee (1%, computed and paid natively by Polymarket at match time) is **co
 locally for display only**. Order previews and confirmations show the fee explicitly
 as an amount **added on top of the quoted size** (e.g. "Size: $50.00 · Fee (1%): $0.50
 · Total: $50.50"). No custom fee-collection logic anywhere in the codebase.
+
+## D-11. Deposit caps (PRD §12 Phase 2 milestone: "small deposit caps ($100/user)")
+**Explicitly waived by Jayden (2026-07-07).** No per-user deposit cap is implemented
+anywhere — a user can deposit any amount today. This is a deliberate scope cut, not an
+oversight: do not add it back or flag it as a forgotten gap without asking first. If
+closed-beta risk exposure becomes a real concern later, revisit deliberately rather
+than reintroducing it as a "fix."
