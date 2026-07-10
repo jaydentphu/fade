@@ -18,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -141,6 +142,34 @@ class ClanMember(Base):
         BigInteger, ForeignKey("users.telegram_user_id"), primary_key=True
     )
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Resolution(Base):
+    """A user's position settled by market resolution (PRD F-14, D-6).
+
+    One row per (user, token): the unique constraint IS the idempotency
+    barrier — a second poll of the same resolution conflicts and never
+    re-notifies, surviving restarts (same discipline as deposits.tx_hash).
+    Feeds the leaderboard's resolution-realized PnL (the other half of D-6).
+    """
+
+    __tablename__ = "resolutions"
+    __table_args__ = (UniqueConstraint("telegram_user_id", "token_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True
+    )
+    token_id: Mapped[str] = mapped_column(String(80))
+    market_title: Mapped[str] = mapped_column(String(200))
+    shares: Mapped[Decimal] = mapped_column(Numeric(20, 6))
+    avg_price: Mapped[Decimal] = mapped_column(Numeric(10, 6))
+    final_price: Mapped[Decimal] = mapped_column(Numeric(10, 6))  # 1 won, 0 lost
+    pnl: Mapped[Decimal] = mapped_column(Numeric(20, 6))
+    won: Mapped[bool] = mapped_column(Boolean)
+    resolved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class UiCard(Base):

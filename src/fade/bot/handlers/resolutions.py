@@ -1,0 +1,153 @@
+"""Resolution lifecycle (PRD F-14): roast or crown when a market settles.
+
+Same restart-safe discipline as the deposit scanner: detection state persists
+in the database (the Resolution row's unique (user, token) constraint is the
+idempotency barrier), so a second poll — or a poll after a restart — never
+double-notifies.
+
+Brand voice applies HERE by design: F-14 is the one money-adjacent moment the
+PRD explicitly wants personality ("roast or crown them"). Deposit/withdraw/
+confirmation screens stay plain; this one gets to talk.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from telegram.ext import ContextTypes
+
+from fade.bot.handlers.common import sanitize
+from fade.db.models import Resolution, Wallet
+
+logger = logging.getLogger(__name__)
+
+CROWN_TEXT = (
+    "👑 Called it.\n"
+    '"{title}" resolved your way: +${pnl}.\n'
+    "{shares} shares settled at $1. The record remembers who was right."
+)
+ROAST_TEXT = (
+    '💀 "{title}" resolved against you: -${pnl}.\n'
+    "{shares} shares settled at zero. Somewhere, someone who faded you is "
+    "smiling. Study the tape, come back meaner."
+)
+
+
+@dataclass(frozen=True)
+class ResolvedPosition:
+    """One settled position, as reported by the data source."""
+
+    token_id: str
+    title: str
+    shares: Decimal
+    avg_price: Decimal
+    final_price: Decimal  # 1 for the winning side, 0 for the losing side
+
+
+class ResolutionScanner:
+    """Polls each user's positions for settled markets and DMs the verdict.
+
+    `fetch` is injectable (an async callable: wallet address -> list of
+    ResolvedPosition) so tests never touch a live network — same pattern as
+    the deposit scanner's Rpc.
+    """
+
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        fetch: Callable[[str], Any],
+    ) -> None:
+        self._sessions = session_factory
+        self._fetch = fetch
+
+    async def scan_once(self, bot: Any) -> int:
+        """Detect and notify newly resolved positions. Returns DMs sent."""
+        async with self._sessions() as session:
+            wallets = (await session.scalars(select(Wallet))).all()
+        notified = 0
+        for wallet in wallets:
+            try:
+                resolved = await self._fetch(wallet.deposit_wallet_address)
+            except Exception:
+                logger.exception("resolution fetch failed for %s", wallet.deposit_wallet_address)
+                continue
+            for position in resolved:
+                if await self._record_and_notify(bot, wallet.telegram_user_id, position):
+                    notified += 1
+        return notified
+
+    async def _record_and_notify(
+        self, bot: Any, telegram_user_id: int, position: ResolvedPosition
+    ) -> bool:
+        pnl = ((position.final_price - position.avg_price) * position.shares).quantize(
+            Decimal("0.01")
+        )
+        won = position.final_price >= Decimal("0.5")
+        # Idempotency barrier FIRST: the unique (user, token) insert must win
+        # before any DM goes out, so a crash after insert costs a notification
+        # at worst — never a duplicate.
+        async with self._sessions() as session:
+            session.add(
+                Resolution(
+                    telegram_user_id=telegram_user_id,
+                    token_id=position.token_id,
+                    market_title=position.title[:200],
+                    shares=position.shares,
+                    avg_price=position.avg_price,
+                    final_price=position.final_price,
+                    pnl=pnl,
+                    won=won,
+                )
+            )
+            try:
+                await session.commit()
+            except IntegrityError:
+                return False  # already recorded (earlier poll or pre-restart)
+
+        template = CROWN_TEXT if won else ROAST_TEXT
+        await bot.send_message(
+            chat_id=telegram_user_id,
+            text=template.format(
+                title=sanitize(position.title),
+                pnl=f"{abs(pnl):.2f}",
+                shares=position.shares,
+            ),
+        )
+        return True
+
+
+async def fetch_resolved_positions(address: str) -> list[ResolvedPosition]:
+    """Production fetcher: redeemable positions from the Polymarket data API."""
+    from polymarket import AsyncPublicClient
+
+    resolved: list[ResolvedPosition] = []
+    async with AsyncPublicClient() as client:
+        page = await client.list_positions(user=address).first_page()
+    for pos in page.items:
+        if not getattr(pos, "redeemable", False):
+            continue
+        if pos.token_id is None or not pos.size or pos.avg_price is None:
+            continue
+        final = Decimal("1") if (pos.cur_price or 0) >= Decimal("0.5") else Decimal("0")
+        resolved.append(
+            ResolvedPosition(
+                token_id=str(pos.token_id),
+                title=pos.title or "(unknown market)",
+                shares=pos.size,
+                avg_price=pos.avg_price,
+                final_price=final,
+            )
+        )
+    return resolved
+
+
+async def scan_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    scanner: ResolutionScanner = context.application.bot_data["resolution_scanner"]
+    await scanner.scan_once(context.bot)

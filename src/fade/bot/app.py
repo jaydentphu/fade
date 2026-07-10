@@ -23,6 +23,7 @@ from fade.bot.handlers import (
     export,
     onboarding,
     positions,
+    resolutions,
     router,
     security,
     trade,
@@ -38,6 +39,8 @@ from fade.wallets import WalletService
 
 DEPOSIT_SCAN_INTERVAL_S = 30
 BROADCAST_DRAIN_INTERVAL_S = 3
+# Resolutions settle slowly (hours/days after close): 5 minutes is plenty.
+RESOLUTION_SCAN_INTERVAL_S = 300
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,9 @@ def build_application(settings: Settings) -> Application:
     app.bot_data["trading"] = TradingService(settings, sessions, wallets, alert=_admin_alert)
     app.bot_data["deposit_scanner"] = deposits.DepositScanner(
         deposits.Rpc(settings.polygon_rpc_url), sessions
+    )
+    app.bot_data["resolution_scanner"] = resolutions.ResolutionScanner(
+        sessions, fetch=resolutions.fetch_resolved_positions
     )
     app.bot_data["broadcasts"] = BroadcastQueue(send=app.bot.send_message)
     # DB-backed so in-flight trade cards survive a restart (memory is the fast path).
@@ -137,5 +143,8 @@ def build_application(settings: Settings) -> Application:
         app.job_queue.run_repeating(deposits.scan_job, interval=DEPOSIT_SCAN_INTERVAL_S, first=10)
         app.job_queue.run_repeating(
             _broadcast_job, interval=BROADCAST_DRAIN_INTERVAL_S, first=BROADCAST_DRAIN_INTERVAL_S
+        )
+        app.job_queue.run_repeating(
+            resolutions.scan_job, interval=RESOLUTION_SCAN_INTERVAL_S, first=60
         )
     return app

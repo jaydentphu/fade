@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from fade.db.models import ClanMember, Order, User
+from fade.db.models import ClanMember, Order, Resolution, User
 
 EASTERN = ZoneInfo("America/New_York")
 RESET_WEEKDAY = 6  # Sunday
@@ -73,6 +73,12 @@ async def compute_leaderboard(
             since_utc = since.astimezone(UTC).replace(tzinfo=None)
             query = query.where(Order.created_at >= since_utc)
         orders = (await session.scalars(query.order_by(Order.created_at))).all()
+        # D-6's other half: positions realized by market RESOLUTION rather than
+        # a manual sell (recorded by the F-14 resolution scanner).
+        res_query = select(Resolution).where(Resolution.telegram_user_id.in_(member_ids))
+        if since is not None:
+            res_query = res_query.where(Resolution.resolved_at >= since_utc)
+        resolutions = (await session.scalars(res_query)).all()
         users = {
             u.telegram_user_id: u
             for u in await session.scalars(
@@ -84,7 +90,17 @@ async def compute_leaderboard(
     for user_id in member_ids:
         own = [o for o in orders if o.telegram_user_id == user_id]
         pnl, volume, wins, closed = _realize(own)
-        if not own:
+        for res in resolutions:
+            if res.telegram_user_id != user_id:
+                continue
+            # Each resolution closes one trade: settlement proceeds count as
+            # volume, PnL was fixed at settlement, a win is positive PnL.
+            pnl += res.pnl
+            volume += res.shares * res.final_price
+            closed += 1
+            if res.pnl > 0:
+                wins += 1
+        if not own and not any(r.telegram_user_id == user_id for r in resolutions):
             continue
         user = users.get(user_id)
         name = user.username if user and user.username else str(user_id)
