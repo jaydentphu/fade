@@ -127,7 +127,7 @@ async def test_sell_tap_shows_confirm_then_executes_full_position(
 ):
     await onboard(USER_ID)
     context = make_context(settings, session_factory)
-    key = positions._cache_position(context, VIEW)
+    key = await positions._cache_position(context, VIEW)
 
     tap = make_callback_update(f"ps:{key}")
     await positions.sell_callback(tap, context)

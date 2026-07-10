@@ -74,7 +74,7 @@ async def test_replayed_webhook_update_executes_exactly_one_order(
     trading, clob = real_trading
     await onboard(USER_ID)
     context = make_context(settings, session_factory, trading)
-    key = trade.cache_card(context, MARKET)
+    key = await trade.cache_card(context, MARKET)
 
     original = callback_update(f"tc:{key}:y:10", update_id=9600)
     replay = callback_update(f"tc:{key}:y:10", update_id=9600)  # same update_id
@@ -93,7 +93,7 @@ async def test_double_tap_on_same_callback_executes_exactly_one_order(
     trading, clob = real_trading
     await onboard(USER_ID)
     context = make_context(settings, session_factory, trading)
-    key = trade.cache_card(context, MARKET)
+    key = await trade.cache_card(context, MARKET)
 
     tap = callback_update(f"tc:{key}:y:25", update_id=9700)
     await trade.confirm_callback(tap, context)
@@ -119,7 +119,7 @@ async def test_clan_confirm_double_tap_executes_exactly_one_order(
         no_token="222",
         message_id=7,
     )
-    key = clan.cache_fade_card(context, card)
+    key = await clan.cache_fade_card(context, card)
 
     tap = callback_update(f"gc:{key}:fd:{USER_ID}:10", update_id=9800, chat_type="supergroup")
     await clan.confirm_callback(tap, context)

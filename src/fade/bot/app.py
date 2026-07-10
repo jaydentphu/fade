@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 
 from telegram import Update
@@ -12,6 +13,7 @@ from telegram.ext import (
     filters,
 )
 
+from fade.bot.cards import CardStore
 from fade.bot.handlers import (
     admin,
     basic,
@@ -29,6 +31,7 @@ from fade.bot.handlers import (
 )
 from fade.config import Settings
 from fade.db.session import make_engine, make_session_factory
+from fade.errors import NullErrorReporter
 from fade.social.broadcast import BroadcastQueue
 from fade.trading.service import TradingService
 from fade.wallets import WalletService
@@ -46,6 +49,13 @@ async def _log_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None
         update.effective_user.id if isinstance(update, Update) and update.effective_user else None
     )
     logger.error("Unhandled error (user=%s)", user_id, exc_info=context.error)
+    reporter = context.application.bot_data.get("error_reporter")
+    if reporter is not None and context.error is not None:
+        # Pluggable sink (Sentry etc. wire in here without touching handlers).
+        # Passed the exception and user id only — never update contents or keys.
+        maybe = reporter.report(context.error, user_id=user_id)
+        if inspect.isawaitable(maybe):
+            await maybe
 
 
 async def _broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -66,6 +76,10 @@ def build_application(settings: Settings) -> Application:
         deposits.Rpc(settings.polygon_rpc_url), sessions
     )
     app.bot_data["broadcasts"] = BroadcastQueue(send=app.bot.send_message)
+    # DB-backed so in-flight trade cards survive a restart (memory is the fast path).
+    app.bot_data["cards"] = CardStore(session_factory=sessions)
+    # Default no-op; a prod build can replace with a Sentry-backed reporter.
+    app.bot_data["error_reporter"] = NullErrorReporter()
 
     # Commands
     app.add_handler(CommandHandler("start", onboarding.start))

@@ -15,10 +15,10 @@ NO_RESULTS_TEXT = "Nothing found. Either it doesn't exist or nobody's brave enou
 FETCHING_TEXT = "Looking..."
 
 
-def _results_keyboard(context: ContextTypes.DEFAULT_TYPE, cards) -> InlineKeyboardMarkup:
+async def _results_keyboard(context: ContextTypes.DEFAULT_TYPE, cards) -> InlineKeyboardMarkup:
     rows = []
     for card in cards:
-        key = cache_card(context, card)
+        key = await cache_card(context, card)
         price = f" ({card.yes_price:.2f})" if card.yes_price is not None else ""
         label = sanitize(card.question, limit=48) + price
         rows.append([InlineKeyboardButton(label, callback_data=f"v:{key}")])
@@ -34,7 +34,7 @@ async def trending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not cards:
         await progress.edit_text(NO_RESULTS_TEXT)
         return
-    await progress.edit_text(TRENDING_HEADER, reply_markup=_results_keyboard(context, cards))
+    await progress.edit_text(TRENDING_HEADER, reply_markup=await _results_keyboard(context, cards))
 
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,7 +52,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await progress.edit_text(
         SEARCH_HEADER.format(query=sanitize(query_text, limit=48)),
-        reply_markup=_results_keyboard(context, cards),
+        reply_markup=await _results_keyboard(context, cards),
     )
 
 
@@ -63,7 +63,7 @@ async def view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     await query.answer()
     key = query.data.split(":")[1]
-    card = get_card(context, key)
+    card = await get_card(context, key)
     if card is None:
         await query.edit_message_text("That card expired. Run the command again.")
         return

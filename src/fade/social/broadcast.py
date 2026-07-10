@@ -8,6 +8,7 @@ Group-rendered text NEVER includes balances or wallet addresses (PRD F-7).
 
 from __future__ import annotations
 
+import inspect
 import time
 from collections import deque
 from collections.abc import Callable
@@ -79,7 +80,9 @@ class BroadcastQueue:
                     reply_to_message_id=message.reply_to_message_id,
                 )
                 if message.on_sent is not None:
-                    message.on_sent(sent)
+                    result = message.on_sent(sent)
+                    if inspect.isawaitable(result):
+                        await result
                 self._sent_at[chat_id].append(self.now())
                 budget -= 1
                 delivered += 1

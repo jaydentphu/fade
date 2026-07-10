@@ -6,13 +6,13 @@ Confirmation screens are money screens: plain and precise.
 
 from __future__ import annotations
 
-import secrets
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from fade.bot.cards import get_store
 from fade.bot.handlers.common import sanitize
 from fade.db.models import User
 from fade.trading.markets import MarketCard, MarketLookupError
@@ -51,15 +51,12 @@ REJECTED_TEXT = "Order not filled: {reason}. Nothing was spent."
 FAILED_TEXT = "Order failed: {reason}. Nothing was spent."
 
 
-def cache_card(context: ContextTypes.DEFAULT_TYPE, card: MarketCard) -> str:
-    cards = context.application.bot_data.setdefault("market_cards", {})
-    key = secrets.token_hex(4)
-    cards[key] = card
-    return key
+async def cache_card(context: ContextTypes.DEFAULT_TYPE, card: MarketCard) -> str:
+    return await get_store(context).put("market", card)
 
 
-def get_card(context: ContextTypes.DEFAULT_TYPE, key: str) -> MarketCard | None:
-    return context.application.bot_data.get("market_cards", {}).get(key)
+async def get_card(context: ContextTypes.DEFAULT_TYPE, key: str) -> MarketCard | None:
+    return await get_store(context).get("market", key)
 
 
 async def user_onboarded(context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int) -> bool:
@@ -116,7 +113,7 @@ async def show_market_card(update: Update, context: ContextTypes.DEFAULT_TYPE, u
         await update.message.reply_text(MARKET_CLOSED_TEXT)
         return
 
-    key = cache_card(context, card)
+    key = await cache_card(context, card)
     await update.message.reply_text(render_card_text(card), reply_markup=card_keyboard(key))
 
 
@@ -127,7 +124,7 @@ async def size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     await query.answer()
     _, key, side_letter, size = query.data.split(":")
-    card = get_card(context, key)
+    card = await get_card(context, key)
     if card is None:
         await query.edit_message_text(CARD_EXPIRED_TEXT)
         return
@@ -144,7 +141,7 @@ async def handle_custom_amount(update: Update, context: ContextTypes.DEFAULT_TYP
     if pending is None or update.message is None or update.message.text is None:
         return False
     key, side_letter = pending
-    card = get_card(context, key)
+    card = await get_card(context, key)
     try:
         amount = Decimal(update.message.text.strip().lstrip("$"))
     except InvalidOperation:
@@ -199,7 +196,7 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(NOT_ONBOARDED_TEXT)
         return
     _, key, side_letter, amount_raw = query.data.split(":")
-    card = get_card(context, key)
+    card = await get_card(context, key)
     if card is None:
         await query.edit_message_text(CARD_EXPIRED_TEXT)
         return

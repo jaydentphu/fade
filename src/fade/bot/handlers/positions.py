@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import secrets
 from decimal import Decimal
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from fade.bot.cards import get_store
 from fade.bot.handlers.common import GROUP_REDIRECT_TEXT, dm_button, sanitize
 from fade.bot.handlers.trade import NOT_ONBOARDED_TEXT, render_result, user_onboarded
 
@@ -20,15 +20,12 @@ SELL_CONFIRM_TEXT = (
 )
 
 
-def _cache_position(context: ContextTypes.DEFAULT_TYPE, view) -> str:
-    cache = context.application.bot_data.setdefault("positions_cache", {})
-    key = secrets.token_hex(4)
-    cache[key] = view
-    return key
+async def _cache_position(context: ContextTypes.DEFAULT_TYPE, view) -> str:
+    return await get_store(context).put("position", view)
 
 
-def _get_position(context: ContextTypes.DEFAULT_TYPE, key: str):
-    return context.application.bot_data.get("positions_cache", {}).get(key)
+async def _get_position(context: ContextTypes.DEFAULT_TYPE, key: str):
+    return await get_store(context).get("position", key)
 
 
 def render_position_line(view) -> str:
@@ -71,7 +68,7 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     for view in views:
-        key = _cache_position(context, view)
+        key = await _cache_position(context, view)
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Sell", callback_data=f"ps:{key}")]])
         await update.message.reply_text(render_position_line(view), reply_markup=keyboard)
     await progress.delete()
@@ -84,7 +81,7 @@ async def sell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     await query.answer()
     key = query.data.split(":")[1]
-    view = _get_position(context, key)
+    view = await _get_position(context, key)
     if view is None:
         await query.edit_message_text("That card expired. Run /positions again.")
         return
@@ -110,7 +107,7 @@ async def sell_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return
     await query.answer()
     key = query.data.split(":")[1]
-    view = _get_position(context, key)
+    view = await _get_position(context, key)
     if view is None:
         await query.edit_message_text("That card expired. Run /positions again.")
         return

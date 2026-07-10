@@ -103,7 +103,7 @@ async def seed_clan_with_members(context, session_factory, onboard) -> None:
 
 async def priya_trades(context, update_id: int = 8000) -> None:
     """Priya confirms a YES buy in DM, which triggers the broadcast."""
-    key = trade.cache_card(context, MARKET)
+    key = await trade.cache_card(context, MARKET)
     update = dm_callback(f"tc:{key}:y:25", PRIYA, "priya", update_id)
     await trade.confirm_callback(update, context)
 

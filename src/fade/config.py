@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 _SECRET_FIELDS = {
     "telegram_bot_token",
+    "telegram_webhook_secret",
     "fade_signing_key",
     "relayer_api_key",
     "builder_api_key",
@@ -37,6 +38,8 @@ class Settings:
     builder_api_secret: str = ""
     builder_api_passphrase: str = ""
     polygon_rpc_url: str = "https://1rpc.io/matic"
+    # Required in webhook (prod) mode only; polling mode ignores it.
+    telegram_webhook_secret: str = ""
     attestation_version: str = field(default="2026-07-04")
 
     def __repr__(self) -> str:  # keep secrets out of logs and tracebacks
@@ -72,4 +75,5 @@ def load_settings() -> Settings:
         builder_api_secret=os.environ.get("FADE_BUILDER_API_SECRET", ""),
         builder_api_passphrase=os.environ.get("FADE_BUILDER_API_PASSPHRASE", ""),
         polygon_rpc_url=os.environ.get("POLYGON_RPC_URL", "https://1rpc.io/matic"),
+        telegram_webhook_secret=os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""),
     )

@@ -1,4 +1,8 @@
-"""Dev entrypoint: long polling. Prod will use webhook mode behind FastAPI."""
+"""Entrypoints.
+
+Dev: `fade-bot` runs long polling (this module's main).
+Prod: `uvicorn fade.webhook:create_webhook_app --factory` serves the webhook.
+"""
 
 from __future__ import annotations
 

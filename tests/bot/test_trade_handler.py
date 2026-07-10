@@ -135,7 +135,7 @@ async def test_non_binary_market_gets_polite_rejection(settings, session_factory
 
 async def test_size_tap_shows_confirm_step(settings, session_factory, onboard):
     context = make_context(settings, session_factory)
-    key = trade.cache_card(context, CARD)
+    key = await trade.cache_card(context, CARD)
     update = make_callback_update(f"t:{key}:y:25")
 
     await trade.size_callback(update, context)
@@ -148,7 +148,7 @@ async def test_confirm_executes_order_and_reports_fill(settings, session_factory
     """PRD F-13: confirmation shows fill price, size, fee, and new balance."""
     await onboard(USER_ID)
     context = make_context(settings, session_factory)
-    key = trade.cache_card(context, CARD)
+    key = await trade.cache_card(context, CARD)
     update = make_callback_update(f"tc:{key}:y:25", update_id=6001)
 
     await trade.confirm_callback(update, context)
@@ -170,7 +170,7 @@ async def test_confirm_executes_order_and_reports_fill(settings, session_factory
 async def test_custom_amount_flow(settings, session_factory, onboard):
     await onboard(USER_ID)
     context = make_context(settings, session_factory)
-    key = trade.cache_card(context, CARD)
+    key = await trade.cache_card(context, CARD)
 
     tap = make_callback_update(f"t:{key}:n:c")
     await trade.size_callback(tap, context)
@@ -185,7 +185,7 @@ async def test_custom_amount_flow(settings, session_factory, onboard):
 
 async def test_custom_amount_rejects_garbage_and_out_of_bounds(settings, session_factory, onboard):
     context = make_context(settings, session_factory)
-    key = trade.cache_card(context, CARD)
+    key = await trade.cache_card(context, CARD)
     context.user_data["pending_custom"] = (key, "y")
 
     bad = make_message_update("banana")
@@ -203,7 +203,7 @@ async def test_duplicate_result_does_not_replace_message(settings, session_facto
     context.application.bot_data["trading"].execute_market_order = AsyncMock(
         return_value=OrderResult(status="duplicate", side="BUY")
     )
-    key = trade.cache_card(context, CARD)
+    key = await trade.cache_card(context, CARD)
     update = make_callback_update(f"tc:{key}:y:10")
 
     await trade.confirm_callback(update, context)

@@ -87,7 +87,7 @@ async def test_view_callback_swaps_in_tradeable_card():
 
     from fade.bot.handlers.trade import cache_card
 
-    key = cache_card(context, CARD)
+    key = await cache_card(context, CARD)
     update.callback_query.data = f"v:{key}"
 
     await discover.view_callback(update, context)

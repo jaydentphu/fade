@@ -99,13 +99,13 @@ async def test_paused_blocks_every_order_path_but_withdrawals_complete(
     context = make_context(settings, session_factory, trading)
 
     # Path 1: DM buy confirm.
-    key = trade.cache_card(context, MARKET)
+    key = await trade.cache_card(context, MARKET)
     buy = callback_update(f"tc:{key}:y:10", update_id=9100)
     await trade.confirm_callback(buy, context)
     assert buy.callback_query.edit_message_text.call_args.args[0] == PAUSED_TEXT
 
     # Path 2: position sell confirm.
-    pos_key = positions._cache_position(context, VIEW)
+    pos_key = await positions._cache_position(context, VIEW)
     sell = callback_update(f"psc:{pos_key}", update_id=9200)
     await positions.sell_confirm_callback(sell, context)
     assert sell.callback_query.edit_message_text.call_args.args[0] == PAUSED_TEXT
@@ -121,7 +121,7 @@ async def test_paused_blocks_every_order_path_but_withdrawals_complete(
         no_token="222",
         message_id=5,
     )
-    clan_key = clan.cache_fade_card(context, fade_card)
+    clan_key = await clan.cache_fade_card(context, fade_card)
     group = callback_update(
         f"gc:{clan_key}:fd:{USER_ID}:10", update_id=9300, chat_type="supergroup"
     )
@@ -153,7 +153,7 @@ async def test_resume_restores_every_order_path(settings, session_factory, onboa
     await trading.set_paused(False, by_user_id=1)
     context = make_context(settings, session_factory, trading)
 
-    key = trade.cache_card(context, MARKET)
+    key = await trade.cache_card(context, MARKET)
     buy = callback_update(f"tc:{key}:y:10", update_id=9500)
     await trade.confirm_callback(buy, context)
 

@@ -9,7 +9,17 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -131,6 +141,22 @@ class ClanMember(Base):
         BigInteger, ForeignKey("users.telegram_user_id"), primary_key=True
     )
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UiCard(Base):
+    """Durable store for in-flight interactive cards (market/position/fade).
+
+    Survives process restarts so a redeploy doesn't strand someone mid-trade.
+    Rows past the TTL are treated as expired ("card expired" UX, not a crash).
+    Payload is JSON of the card dataclass; no key material, ever.
+    """
+
+    __tablename__ = "ui_cards"
+
+    key: Mapped[str] = mapped_column(String(16), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))  # market | position | fade
+    payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ChainScanState(Base):

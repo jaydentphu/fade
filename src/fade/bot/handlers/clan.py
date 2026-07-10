@@ -7,7 +7,6 @@ so FOK, slippage guard, builder code, and idempotency all apply unchanged.
 
 from __future__ import annotations
 
-import secrets
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -16,6 +15,7 @@ from sqlalchemy import select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from fade.bot.cards import get_store
 from fade.bot.handlers.common import sanitize
 from fade.bot.handlers.trade import user_onboarded
 from fade.db.models import Clan, ClanMember, User
@@ -61,15 +61,12 @@ class FadeCard:
     extra: dict = field(default_factory=dict)
 
 
-def cache_fade_card(context: ContextTypes.DEFAULT_TYPE, card: FadeCard) -> str:
-    cards = context.application.bot_data.setdefault("fade_cards", {})
-    key = secrets.token_hex(4)
-    cards[key] = card
-    return key
+async def cache_fade_card(context: ContextTypes.DEFAULT_TYPE, card: FadeCard) -> str:
+    return await get_store(context).put("fade", card)
 
 
-def get_fade_card(context: ContextTypes.DEFAULT_TYPE, key: str) -> FadeCard | None:
-    return context.application.bot_data.get("fade_cards", {}).get(key)
+async def get_fade_card(context: ContextTypes.DEFAULT_TYPE, key: str) -> FadeCard | None:
+    return await get_store(context).get("fade", key)
 
 
 def fade_copy_keyboard(key: str) -> InlineKeyboardMarkup:
@@ -268,11 +265,14 @@ async def broadcast_fill(
                 yes_token=yes_token,
                 no_token=no_token,
             )
-            key = cache_fade_card(context, card)
+            key = await cache_fade_card(context, card)
             markup = fade_copy_keyboard(key)
 
-            def _remember(message, card=card):
+            async def _remember(message, card=card, key=key):
+                # Persist the sent card's message_id so the F-19 rivalry reply
+                # can thread onto it even after a restart.
                 card.message_id = getattr(message, "message_id", None)
+                await get_store(context).update("fade", key, card)
 
             queue.enqueue(
                 PendingMessage(chat_id=chat_id, text=text, reply_markup=markup),
@@ -291,7 +291,7 @@ async def fade_copy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if query is None or query.data is None or update.effective_user is None:
         return
     mode, key = query.data.split(":")  # fd | cp
-    card = get_fade_card(context, key)
+    card = await get_fade_card(context, key)
     if card is None:
         await query.answer(CARD_EXPIRED_ALERT, show_alert=True)
         return
@@ -329,7 +329,7 @@ async def size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update.effective_user.id != int(owner_id):
         await query.answer(NOT_YOUR_PICKER_ALERT, show_alert=True)
         return
-    card = get_fade_card(context, key)
+    card = await get_fade_card(context, key)
     if card is None:
         await query.answer(CARD_EXPIRED_ALERT, show_alert=True)
         return
@@ -361,7 +361,7 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if update.effective_user.id != int(owner_id):
         await query.answer(NOT_YOUR_PICKER_ALERT, show_alert=True)
         return
-    card = get_fade_card(context, key)
+    card = await get_fade_card(context, key)
     if card is None:
         await query.answer(CARD_EXPIRED_ALERT, show_alert=True)
         return
