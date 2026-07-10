@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from dotenv import load_dotenv
 
@@ -40,6 +41,8 @@ class Settings:
     polygon_rpc_url: str = "https://1rpc.io/matic"
     # Required in webhook (prod) mode only; polling mode ignores it.
     telegram_webhook_secret: str = ""
+    # Per-user rolling-24h BUY volume ceiling (PRD §7.7). 0 disables. See D-12.
+    daily_volume_cap_usd: Decimal = Decimal("1000")
     attestation_version: str = field(default="2026-07-04")
 
     def __repr__(self) -> str:  # keep secrets out of logs and tracebacks
@@ -76,4 +79,5 @@ def load_settings() -> Settings:
         builder_api_passphrase=os.environ.get("FADE_BUILDER_API_PASSPHRASE", ""),
         polygon_rpc_url=os.environ.get("POLYGON_RPC_URL", "https://1rpc.io/matic"),
         telegram_webhook_secret=os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""),
+        daily_volume_cap_usd=Decimal(os.environ.get("FADE_DAILY_VOLUME_CAP_USD") or "1000"),
     )

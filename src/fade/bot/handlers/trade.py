@@ -248,6 +248,9 @@ async def render_result(query, result, action: str, question: str) -> None:
         await query.answer(DUPLICATE_TEXT)
     elif result.status == "paused":
         await query.edit_message_text(PAUSED_TEXT)
+    elif result.status == "capped":
+        # Money screen: the service's plain-language limit message, verbatim.
+        await query.edit_message_text(result.error)
     elif result.status == "rejected":
         await query.edit_message_text(REJECTED_TEXT.format(reason=result.error))
     else:

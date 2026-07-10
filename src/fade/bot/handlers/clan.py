@@ -389,6 +389,9 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "Trading is paused right now. Withdrawals still work: DM me /withdraw."
         )
         return
+    if result.status == "capped":
+        await query.edit_message_text(result.error)
+        return
     if result.status != "filled":
         reason = result.error or result.status
         await query.edit_message_text(f"Order not filled: {reason}. Nothing was spent.")

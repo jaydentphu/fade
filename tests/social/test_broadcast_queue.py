@@ -49,11 +49,19 @@ async def test_queue_caps_at_twenty_messages_per_minute_per_group():
 
 
 async def test_rate_limits_are_independent_per_chat():
-    queue, sent, _ = make_queue()
+    # Each chat independently reaches its own 20/min cap. The global 30/sec cap
+    # (added in the safety-hardening stage) means two chats can't BOTH hit 20 in
+    # a single instantaneous drain, so we advance the clock past the 1s global
+    # window (but stay inside the 60s per-chat window) and drain again. This
+    # still proves per-chat independence — the point of the test — rather than
+    # weakening it.
+    queue, sent, clock = make_queue()
     for i in range(25):
         queue.enqueue(PendingMessage(chat_id=CHAT_A, text=f"a{i}"))
         queue.enqueue(PendingMessage(chat_id=CHAT_B, text=f"b{i}"))
 
+    await queue.drain_once()
+    clock.advance(2)  # clears the global 1s window; per-chat 60s window persists
     await queue.drain_once()
 
     a_sent = [m for m in sent if m["chat_id"] == CHAT_A]

@@ -9,14 +9,16 @@ Every order:
 
 from __future__ import annotations
 
+import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
 from polymarket import AsyncPublicClient
 from polymarket.errors import UnexpectedResponseError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -27,10 +29,27 @@ from fade.wallets import PUSD_DECIMALS, WalletService
 
 CENT = Decimal("0.01")
 
+logger = logging.getLogger(__name__)
+
+VOLUME_CAP_TEXT = (
+    "Daily trade limit reached: ${cap} of buys per 24 hours. "
+    "You can still sell positions and withdraw. The limit resets on its own."
+)
+
+# Anomaly alert (PRD §7.7): flag a user whose last-24h volume blows past their
+# own recent baseline. Absolute floor stops new-user noise. See D-12.
+ANOMALY_MULTIPLIER = Decimal("5")
+ANOMALY_FLOOR_USD = Decimal("200")
+ANOMALY_ALERT_TEXT = (
+    "⚠️ Volume anomaly: user {user_id} traded ${recent} in the last 24h "
+    "(baseline ${baseline}/day over the prior week). Worth a look: /pause "
+    "stops trading if something is wrong."
+)
+
 
 @dataclass(frozen=True)
 class OrderResult:
-    status: str  # filled | rejected | duplicate | paused | failed
+    status: str  # filled | rejected | duplicate | paused | capped | failed
     side: str = ""
     fill_price: Decimal | None = None
     fill_shares: Decimal | None = None
@@ -58,10 +77,15 @@ class TradingService:
         settings: Settings,
         session_factory: async_sessionmaker[AsyncSession],
         wallets: WalletService,
+        now: Callable[[], datetime] | None = None,
+        alert: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
         self._sessions = session_factory
         self._wallets = wallets
+        self._now = now or (lambda: datetime.now(UTC))
+        self._alert = alert  # async sink for admin anomaly alerts (optional)
+        self._alerted_users: set[int] = set()  # currently-flagged incidents
 
     # -- market data ---------------------------------------------------------
 
@@ -147,6 +171,17 @@ class TradingService:
         if await self.is_paused():
             return OrderResult(status="paused", side=side)
 
+        # Daily volume ceiling (PRD §7.7, D-12): BUYS only — selling out of a
+        # position must always remain possible, like withdrawals. Checked
+        # before the CLOB and before the idempotency row (nothing happened).
+        cap = self._settings.daily_volume_cap_usd
+        if side == "BUY" and cap > 0:
+            recent = await self._volume_last_24h(telegram_user_id)
+            if recent + amount > cap:
+                return OrderResult(
+                    status="capped", side=side, error=VOLUME_CAP_TEXT.format(cap=cap)
+                )
+
         # Idempotency barrier: record the attempt before touching the CLOB.
         order = Order(
             telegram_user_id=telegram_user_id,
@@ -182,7 +217,60 @@ class TradingService:
             fee=result.fee,
             error=result.error,
         )
+        if result.status == "filled":
+            try:
+                await self._check_anomaly(telegram_user_id)
+            except Exception:  # an alerting failure must never break trading
+                logger.exception("anomaly check failed for user %s", telegram_user_id)
         return result
+
+    # -- safety rails (PRD §7.7, D-12) ----------------------------------------
+
+    async def _volume_last_24h(self, telegram_user_id: int) -> Decimal:
+        since = (self._now() - timedelta(hours=24)).astimezone(UTC).replace(tzinfo=None)
+        async with self._sessions() as session:
+            total = await session.scalar(
+                select(func.coalesce(func.sum(Order.fill_usdc), 0)).where(
+                    Order.telegram_user_id == telegram_user_id,
+                    Order.status == "filled",
+                    Order.created_at >= since,
+                )
+            )
+        return Decimal(str(total))
+
+    async def _check_anomaly(self, telegram_user_id: int) -> None:
+        """DM the admin once per incident when a user's 24h volume blows past
+        their own trailing baseline (5x prior-week daily average, $200 floor)."""
+        if self._alert is None:
+            return
+        recent = await self._volume_last_24h(telegram_user_id)
+        now_naive = self._now().astimezone(UTC).replace(tzinfo=None)
+        week_ago = now_naive - timedelta(days=8)
+        day_ago = now_naive - timedelta(hours=24)
+        async with self._sessions() as session:
+            prior = await session.scalar(
+                select(func.coalesce(func.sum(Order.fill_usdc), 0)).where(
+                    Order.telegram_user_id == telegram_user_id,
+                    Order.status == "filled",
+                    Order.created_at >= week_ago,
+                    Order.created_at < day_ago,
+                )
+            )
+        baseline = Decimal(str(prior)) / Decimal(7)
+        threshold = max(baseline * ANOMALY_MULTIPLIER, ANOMALY_FLOOR_USD)
+        if recent > threshold:
+            if telegram_user_id not in self._alerted_users:
+                self._alerted_users.add(telegram_user_id)
+                await self._alert(
+                    ANOMALY_ALERT_TEXT.format(
+                        user_id=telegram_user_id,
+                        recent=f"{recent:.2f}",
+                        baseline=f"{baseline:.2f}",
+                    )
+                )
+        else:
+            # Incident over: re-arm so a future spike alerts again.
+            self._alerted_users.discard(telegram_user_id)
 
     async def _place(
         self,

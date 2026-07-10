@@ -23,6 +23,9 @@ from fade.db.models import ClanMember, User
 
 PER_CHAT_PER_MINUTE = 20
 WINDOW_S = 60.0
+# Telegram's global bot limit is ~30 messages/second across ALL chats (PRD §6).
+GLOBAL_PER_SECOND = 30
+GLOBAL_WINDOW_S = 1.0
 
 TRADE_CARD_TEXT = "{who} {action} {size}on:\n{question}\nEntry: {price}"
 SELL_CARD_TEXT = "{who} sold {size}of:\n{question}\nExit: {price}"
@@ -48,6 +51,7 @@ class BroadcastQueue:
     now: Callable[[], float] = time.monotonic
     _queues: dict[int, deque[PendingMessage]] = field(default_factory=dict)
     _sent_at: dict[int, deque[float]] = field(default_factory=dict)
+    _sent_global: deque[float] = field(default_factory=deque)
 
     def enqueue(
         self, message: PendingMessage, on_sent: Callable[[Any], None] | None = None
@@ -66,12 +70,18 @@ class BroadcastQueue:
             sent.popleft()
         return PER_CHAT_PER_MINUTE - len(sent)
 
+    def _global_budget(self) -> int:
+        cutoff = self.now() - GLOBAL_WINDOW_S
+        while self._sent_global and self._sent_global[0] <= cutoff:
+            self._sent_global.popleft()
+        return GLOBAL_PER_SECOND - len(self._sent_global)
+
     async def drain_once(self) -> int:
-        """Send whatever each chat's rate budget allows. Returns messages sent."""
+        """Send what the per-chat AND global rate budgets allow. Returns sent count."""
         delivered = 0
         for chat_id, queue in list(self._queues.items()):
             budget = self._budget(chat_id)
-            while queue and budget > 0:
+            while queue and budget > 0 and self._global_budget() > 0:
                 message = queue.popleft()
                 sent = await self.send(
                     chat_id=message.chat_id,
@@ -83,7 +93,9 @@ class BroadcastQueue:
                     result = message.on_sent(sent)
                     if inspect.isawaitable(result):
                         await result
-                self._sent_at[chat_id].append(self.now())
+                stamp = self.now()
+                self._sent_at[chat_id].append(stamp)
+                self._sent_global.append(stamp)
                 budget -= 1
                 delivered += 1
             if not queue:

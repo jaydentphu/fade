@@ -78,3 +78,24 @@ anywhere — a user can deposit any amount today. This is a deliberate scope cut
 oversight: do not add it back or flag it as a forgotten gap without asking first. If
 closed-beta risk exposure becomes a real concern later, revisit deliberately rather
 than reintroducing it as a "fix."
+
+## D-12. Safety rails: daily volume cap + anomaly alert (PRD §7.7, §6)
+Decided 2026-07-10 during the safety-hardening stage. Note this is a *trade-volume*
+ceiling, distinct from the *deposit* cap waived in D-11 — a user's own funds are their
+own, but how fast the backend spends them on their behalf is a blast-radius control.
+
+- **Per-user daily trade-volume cap = $1000 / rolling 24h of BUYS** (env var
+  `FADE_DAILY_VOLUME_CAP_USD`, default `1000`; set `0` to disable). Chosen to sit an
+  order of magnitude above a normal Marcus-sized session ($10–50 trades) so it never
+  annoys a real user, while capping how much a compromised backend or a runaway loop
+  can churn through one account in a day. **BUYS only** — sells and withdrawals are
+  never capped, same principle as the kill switch: you can always reduce risk / exit,
+  never be trapped into more of it. Enforced before the CLOB and before the idempotency
+  row, so a capped attempt is a true no-op.
+- **Anomaly alert threshold = 24h volume > max(5× prior-week daily average, $200).**
+  The 5× multiplier catches a genuine break from a user's own pattern; the $200 floor
+  stops new-user / low-history noise (without it, a first-ever $30 trade would look
+  infinitely above a $0 baseline). Alerts DM `FADE_ADMIN_USER_ID`, at most once per
+  incident (re-arms once the user's 24h volume falls back under threshold), and an
+  alerting failure never blocks the trade. These numbers are deliberately conservative
+  starting points — tune against real traffic, they're not load-bearing guarantees.

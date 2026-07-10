@@ -71,7 +71,13 @@ def build_application(settings: Settings) -> Application:
     app.bot_data["settings"] = settings
     app.bot_data["sessions"] = sessions
     app.bot_data["wallets"] = wallets
-    app.bot_data["trading"] = TradingService(settings, sessions, wallets)
+
+    async def _admin_alert(text: str) -> None:
+        # Anomaly alerts DM the builder (PRD §7.7). No admin configured = no-op.
+        if settings.admin_user_id:
+            await app.bot.send_message(chat_id=settings.admin_user_id, text=text)
+
+    app.bot_data["trading"] = TradingService(settings, sessions, wallets, alert=_admin_alert)
     app.bot_data["deposit_scanner"] = deposits.DepositScanner(
         deposits.Rpc(settings.polygon_rpc_url), sessions
     )
