@@ -18,7 +18,7 @@ from telegram.ext import ContextTypes
 from fade.bot.cards import get_store
 from fade.bot.handlers.common import sanitize
 from fade.bot.handlers.trade import user_onboarded
-from fade.db.models import Clan, ClanMember, User
+from fade.db.models import Clan, ClanMember, FadeEvent, User
 from fade.social.broadcast import PendingMessage, hide_amounts_for, render_trade_card
 from fade.social.leaderboard import EASTERN, compute_leaderboard, week_start
 
@@ -398,6 +398,18 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     tapper = update.effective_user
+    # F-22 history: record who faded/copied whom.
+    async with context.application.bot_data["sessions"]() as session:
+        session.add(
+            FadeEvent(
+                actor_id=tapper.id,
+                target_id=card.orig_user_id,
+                mode=mode,
+                chat_id=card.chat_id,
+            )
+        )
+        await session.commit()
+
     actor = sanitize(tapper.username or tapper.first_name, limit=40)
     orig = sanitize(card.orig_username, limit=40)
     hide = await hide_amounts_for(context.application.bot_data["sessions"], tapper.id)

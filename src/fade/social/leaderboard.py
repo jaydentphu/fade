@@ -118,18 +118,18 @@ async def compute_leaderboard(
     return rows
 
 
-def _realize(orders: list[Order]) -> tuple[Decimal, Decimal, int, int]:
-    """Walk a user's fills chronologically, realizing PnL on each sell."""
-    pnl = Decimal(0)
-    volume = Decimal(0)
-    wins = 0
-    closed = 0
+def realized_events(orders: list[Order]) -> list[tuple[datetime, Decimal]]:
+    """Per-trade realized PnL events from sells, chronologically.
+
+    THE single sell-realization calculation: the leaderboard totals it and
+    /record (F-22) inspects individual events — same numbers by construction.
+    """
+    events: list[tuple[datetime, Decimal]] = []
     # Per-token running average cost basis.
     basis: dict[str, tuple[Decimal, Decimal]] = {}  # token -> (shares, usdc cost)
     for order in orders:
         shares = order.fill_shares or Decimal(0)
         usdc = order.fill_usdc or Decimal(0)
-        volume += usdc
         if order.side == "BUY":
             held_shares, held_cost = basis.get(order.token_id, (Decimal(0), Decimal(0)))
             basis[order.token_id] = (held_shares + shares, held_cost + usdc)
@@ -138,10 +138,16 @@ def _realize(orders: list[Order]) -> tuple[Decimal, Decimal, int, int]:
         held_shares, held_cost = basis.get(order.token_id, (Decimal(0), Decimal(0)))
         avg_cost = (held_cost / held_shares) if held_shares else Decimal(0)
         realized = usdc - (avg_cost * shares)
-        pnl += realized
-        closed += 1
-        if realized > 0:
-            wins += 1
+        events.append((order.created_at, realized))
         remaining = max(held_shares - shares, Decimal(0))
         basis[order.token_id] = (remaining, avg_cost * remaining)
-    return pnl, volume, wins, closed
+    return events
+
+
+def _realize(orders: list[Order]) -> tuple[Decimal, Decimal, int, int]:
+    """Totals over realized_events plus filled-notional volume (unchanged math)."""
+    events = realized_events(orders)
+    pnl = sum((realized for _, realized in events), Decimal(0))
+    volume = sum((o.fill_usdc or Decimal(0) for o in orders), Decimal(0))
+    wins = sum(1 for _, realized in events if realized > 0)
+    return pnl, volume, wins, len(events)

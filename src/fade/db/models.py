@@ -144,6 +144,21 @@ class ClanMember(Base):
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FadeEvent(Base):
+    """One executed fade or copy: who did it to whom (PRD F-19 history, F-22)."""
+
+    __tablename__ = "fade_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True
+    )
+    target_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    mode: Mapped[str] = mapped_column(String(4))  # fd | cp
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Resolution(Base):
     """A user's position settled by market resolution (PRD F-14, D-6).
 

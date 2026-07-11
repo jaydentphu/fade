@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 import logging
+from datetime import datetime
+from datetime import time as dtime
 
 from telegram import Update
 from telegram.ext import (
@@ -23,6 +25,7 @@ from fade.bot.handlers import (
     export,
     onboarding,
     positions,
+    record,
     resolutions,
     router,
     security,
@@ -65,6 +68,25 @@ async def _broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.application.bot_data["broadcasts"].drain_once()
 
 
+async def _league_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Runs daily at 18:00 ET; only Sunday actually announces (PRD J3, D-6).
+
+    Checking the weekday here instead of trusting scheduler day-indexing keeps
+    the behavior explicit and testable.
+    """
+    from fade.social.leaderboard import EASTERN
+    from fade.social.league import announce_league
+
+    now = datetime.now(tz=EASTERN)
+    if now.weekday() != 6:  # Sunday
+        return
+    await announce_league(
+        context.application.bot_data["sessions"],
+        context.application.bot_data["broadcasts"],
+        now,
+    )
+
+
 def build_application(settings: Settings) -> Application:
     app = Application.builder().token(settings.telegram_bot_token).build()
 
@@ -105,6 +127,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("join", clan.join))
     app.add_handler(CommandHandler("privacy", clan.privacy))
     app.add_handler(CommandHandler("leaderboard", clan.leaderboard))
+    app.add_handler(CommandHandler("record", record.record))
     app.add_handler(CommandHandler("security", security.security))
     app.add_handler(CommandHandler("pause", admin.pause))
     app.add_handler(CommandHandler("resume", admin.resume))
@@ -147,4 +170,7 @@ def build_application(settings: Settings) -> Application:
         app.job_queue.run_repeating(
             resolutions.scan_job, interval=RESOLUTION_SCAN_INTERVAL_S, first=60
         )
+        from fade.social.leaderboard import EASTERN
+
+        app.job_queue.run_daily(_league_job, time=dtime(hour=18, minute=0, tzinfo=EASTERN))
     return app
