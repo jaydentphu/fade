@@ -187,6 +187,41 @@ class Resolution(Base):
     )
 
 
+class Challenge(Base):
+    """Head-to-head wager between two group members (PRD F-24).
+
+    Status flow: pending -> declined | expired | executing -> accepted ->
+    settled, with executing -> failed if an order leg doesn't fill. Every
+    transition is an atomic UPDATE ... WHERE status = <expected>, so a double
+    tap, webhook retry, or second settle pass can never act twice.
+
+    The opponent is identified by username (a bot can't resolve @mention ->
+    user id until they interact); their numeric id is captured at accept time.
+    challenger_update_id preserves the proposal callback's Telegram update_id
+    so the challenger's order leg has its own idempotency key at accept time —
+    each real update_id is consumed by at most one order (PRD §6).
+    """
+
+    __tablename__ = "challenges"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    challenger_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_user_id"))
+    challenger_username: Mapped[str] = mapped_column(String(64))
+    opponent_username: Mapped[str] = mapped_column(String(64))  # lowercase, no @
+    opponent_id: Mapped[int | None] = mapped_column(BigInteger)  # learned on accept
+    market_title: Mapped[str] = mapped_column(String(200))
+    yes_token: Mapped[str] = mapped_column(String(80))
+    no_token: Mapped[str] = mapped_column(String(80))
+    challenger_side: Mapped[str] = mapped_column(String(4))  # YES | NO
+    size_usdc: Mapped[Decimal] = mapped_column(Numeric(20, 6))
+    challenger_update_id: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    winner_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class UiCard(Base):
     """Durable store for in-flight interactive cards (market/position/fade).
 

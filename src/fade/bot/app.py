@@ -19,6 +19,7 @@ from fade.bot.cards import CardStore
 from fade.bot.handlers import (
     admin,
     basic,
+    challenge,
     clan,
     deposits,
     discover,
@@ -128,6 +129,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("privacy", clan.privacy))
     app.add_handler(CommandHandler("leaderboard", clan.leaderboard))
     app.add_handler(CommandHandler("record", record.record))
+    app.add_handler(CommandHandler("challenge", challenge.challenge))
     app.add_handler(CommandHandler("security", security.security))
     app.add_handler(CommandHandler("pause", admin.pause))
     app.add_handler(CommandHandler("resume", admin.resume))
@@ -152,6 +154,11 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CallbackQueryHandler(clan.size_callback, pattern="^s[fc]:"))
     app.add_handler(CallbackQueryHandler(clan.confirm_callback, pattern="^gc:"))
     app.add_handler(CallbackQueryHandler(clan.cancel_callback, pattern="^gx:"))
+    # Head-to-head challenges (F-24)
+    app.add_handler(CallbackQueryHandler(challenge.pick_callback, pattern="^hp:"))
+    app.add_handler(CallbackQueryHandler(challenge.accept_callback, pattern="^ha:"))
+    app.add_handler(CallbackQueryHandler(challenge.decline_callback, pattern="^hd:"))
+    app.add_handler(CallbackQueryHandler(challenge.cancel_callback, pattern="^hx:"))
 
     # Free text in DMs: pasted URLs and flow replies
     app.add_handler(

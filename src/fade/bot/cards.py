@@ -56,6 +56,10 @@ def _revive(kind: str, payload: str) -> Any:
         from fade.bot.handlers.clan import FadeCard
 
         return FadeCard(**data)
+    if kind == "challenge":
+        from fade.bot.handlers.challenge import ChallengeCard
+
+        return ChallengeCard(**data)
     raise ValueError(f"unknown card kind: {kind}")
 
 

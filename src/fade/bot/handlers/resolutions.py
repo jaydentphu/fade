@@ -171,3 +171,9 @@ async def fetch_resolved_positions(address: str) -> list[ResolvedPosition]:
 async def scan_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     scanner: ResolutionScanner = context.application.bot_data["resolution_scanner"]
     await scanner.scan_once(context.bot)
+    # Late import: challenge handlers import this module's ResolvedPosition.
+    from fade.bot.handlers.challenge import settle_and_expire
+
+    # F-24 settlement rides this job: the Resolution rows just recorded are
+    # what decides accepted challenges; stale proposals expire on the same tick.
+    await settle_and_expire(context.application.bot_data["sessions"], context.bot)
