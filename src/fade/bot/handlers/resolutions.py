@@ -49,6 +49,7 @@ class ResolvedPosition:
     shares: Decimal
     avg_price: Decimal
     final_price: Decimal  # 1 for the winning side, 0 for the losing side
+    outcome: str = ""  # "Yes" / "No" label, when the data source reports one
 
 
 class ResolutionScanner:
@@ -120,7 +121,25 @@ class ResolutionScanner:
                 shares=position.shares,
             ),
         )
+        if won:
+            await self._send_flex_card(bot, telegram_user_id, position, pnl)
         return True
+
+    async def _send_flex_card(
+        self, bot: Any, telegram_user_id: int, position: ResolvedPosition, pnl: Decimal
+    ) -> None:
+        from fade.social.flex_card import generate_flex_card
+
+        try:
+            image = generate_flex_card(position, pnl)
+        except Exception:
+            logger.exception("flex card generation failed for %s", telegram_user_id)
+            return
+        await bot.send_photo(
+            chat_id=telegram_user_id,
+            photo=image,
+            caption="Called it. Share the receipt.",
+        )
 
 
 async def fetch_resolved_positions(address: str) -> list[ResolvedPosition]:
@@ -143,6 +162,7 @@ async def fetch_resolved_positions(address: str) -> list[ResolvedPosition]:
                 shares=pos.size,
                 avg_price=pos.avg_price,
                 final_price=final,
+                outcome=pos.outcome or "",
             )
         )
     return resolved

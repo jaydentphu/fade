@@ -47,6 +47,7 @@ def make_fetch(positions):
 def make_bot() -> MagicMock:
     bot = MagicMock()
     bot.send_message = AsyncMock()
+    bot.send_photo = AsyncMock()
     return bot
 
 
@@ -72,6 +73,11 @@ async def test_winning_resolution_sends_exactly_one_crown_dm(settings, session_f
     assert "👑" in text and "Called it" in text  # crown voice, not plain
     assert "15.60" in text  # settlement PnL
     assert "Fed cut rates" in text
+    # PRD F-23: a winning resolution also gets a shareable flex card, DM'd once.
+    bot.send_photo.assert_awaited_once()
+    photo_kwargs = bot.send_photo.call_args.kwargs
+    assert photo_kwargs["chat_id"] == USER_ID
+    assert len(photo_kwargs["photo"]) > 0
 
 
 async def test_losing_resolution_sends_exactly_one_roast_dm(settings, session_factory, onboard):
@@ -86,6 +92,8 @@ async def test_losing_resolution_sends_exactly_one_roast_dm(settings, session_fa
     assert "💀" in text and "against you" in text  # roast voice
     assert "11.00" in text  # settlement PnL (magnitude)
     assert "rain" in text
+    # Losses don't get a flex card — there's nothing to flex.
+    bot.send_photo.assert_not_awaited()
 
 
 async def test_polling_same_resolution_twice_never_double_notifies(
@@ -103,6 +111,7 @@ async def test_polling_same_resolution_twice_never_double_notifies(
     await rebooted.scan_once(bot)
 
     bot.send_message.assert_awaited_once()
+    bot.send_photo.assert_awaited_once()  # flex card DM is idempotent too
     async with session_factory() as session:
         rows = (await session.scalars(select(Resolution))).all()
     assert len(rows) == 1 and rows[0].won is True
