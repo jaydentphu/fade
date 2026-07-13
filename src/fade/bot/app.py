@@ -34,9 +34,10 @@ from fade.bot.handlers import (
     wallet,
     withdraw,
 )
+from fade.bot.handlers import digest as digest_handlers
 from fade.config import Settings
 from fade.db.session import make_engine, make_session_factory
-from fade.errors import NullErrorReporter
+from fade.errors import build_reporter
 from fade.social.broadcast import BroadcastQueue
 from fade.trading.service import TradingService
 from fade.wallets import WalletService
@@ -113,9 +114,10 @@ def build_application(settings: Settings) -> Application:
         if settings.admin_user_id:
             await app.bot.send_message(chat_id=settings.admin_user_id, text=text)
 
-    # Default no-op; a prod build can replace with a Sentry-backed reporter.
-    # Wired first so the background loops below can report caught failures.
-    reporter = NullErrorReporter()
+    # Config-assembled sinks (Stage 12): SENTRY_DSN -> Sentry, admin id ->
+    # throttled DMs, neither -> the no-op default. Wired first so the
+    # background loops below can report caught failures.
+    reporter = build_reporter(settings, app.bot.send_message)
     app.bot_data["error_reporter"] = reporter
 
     async def _deactivate_clan(chat_id: int) -> None:
@@ -142,6 +144,8 @@ def build_application(settings: Settings) -> Application:
     )
     # DB-backed so in-flight trade cards survive a restart (memory is the fast path).
     app.bot_data["cards"] = CardStore(session_factory=sessions)
+    # F-26: daily ops digest to the admin (no admin configured = digest off).
+    app.bot_data["digest_sender"] = digest_handlers.DigestSender(sessions, settings.admin_user_id)
 
     # Commands
     app.add_handler(CommandHandler("start", onboarding.start))
@@ -160,6 +164,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("security", security.security))
     app.add_handler(CommandHandler("pause", admin.pause))
     app.add_handler(CommandHandler("resume", admin.resume))
+    app.add_handler(CommandHandler("stats", admin.stats))
     app.add_handler(CommandHandler("ping", basic.ping))
 
     # Callback queries
@@ -208,4 +213,8 @@ def build_application(settings: Settings) -> Application:
         from fade.social.leaderboard import EASTERN
 
         app.job_queue.run_daily(_league_job, time=dtime(hour=18, minute=0, tzinfo=EASTERN))
+        # F-26 daily digest: morning ET, same run_daily pattern as the league.
+        app.job_queue.run_daily(
+            digest_handlers.digest_job, time=dtime(hour=9, minute=0, tzinfo=EASTERN)
+        )
     return app

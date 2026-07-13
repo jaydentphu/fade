@@ -106,6 +106,21 @@ class Order(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Withdrawal(Base):
+    """One completed withdrawal (receipt trail; feeds the F-26 daily digest)."""
+
+    __tablename__ = "withdrawals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True
+    )
+    address: Mapped[str] = mapped_column(String(42))
+    amount: Mapped[Decimal] = mapped_column(Numeric(20, 6))
+    tx_hash: Mapped[str] = mapped_column(String(66))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class WithdrawalAddress(Base):
     """Destination addresses a user has explicitly confirmed (PRD F-4)."""
 

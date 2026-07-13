@@ -22,6 +22,11 @@ dependencies = [
 [project.scripts]
 fade-bot = "fade.__main__:main"
 
+[project.optional-dependencies]
+sentry = [
+    "sentry-sdk>=2.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

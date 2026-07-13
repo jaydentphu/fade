@@ -145,14 +145,37 @@ crash. Logs: `journalctl -u fade -f`.
 
 ---
 
-## 7. Error alerting (optional but recommended)
+## 7. Monitoring
 
-The app calls a pluggable error reporter on every unhandled exception. By
-default it's a no-op (`NullErrorReporter`). To get alerts (e.g. Sentry),
-implement the tiny `ErrorReporter` protocol in `src/fade/errors.py` and set
-`app.bot_data["error_reporter"]` to it in `build_application`. The reporter
-receives only the exception and the affected user id — never message contents
-or key material — so it's safe to send to a third-party service.
+Everything here is config-driven — nothing below is required for the bot to
+run, but run prod blind at your own peril.
+
+**Error reporting.** The app calls an error reporter on every unhandled
+exception AND every caught background-loop failure. It receives only the
+exception and the affected user id — never message contents or key material —
+so it's safe to send to a third-party service. Two sinks assemble themselves
+from env vars (either, both, or neither):
+
+- `SENTRY_DSN=https://...@sentry.io/...` — sends errors to Sentry. Needs the
+  optional dependency: `uv sync --extra sentry` (declared as the `sentry`
+  extra in pyproject.toml).
+- `FADE_ADMIN_USER_ID` set — unhandled errors are also DM'd to you directly,
+  throttled to one DM per error signature per hour, so a crash-loop produces
+  one alert instead of a flooded chat.
+
+With neither set, the reporter is a no-op (the dev default).
+
+**Daily digest (F-26).** With `FADE_ADMIN_USER_ID` set, the bot DMs you once
+a day (09:00 ET) with the last 24 hours: new users, active users (placed an
+order), filled order count and USD volume, builder fees earned, failed or
+rejected order count, deposit and withdrawal counts, and whether trading is
+paused. `/stats` (admin-only, DM-only) returns the same digest on demand.
+Aggregates only — it never contains a user's wallet address or balance.
+
+**What to check weekly:** the digest's failed/rejected count trending up
+(fill quality or SDK trouble), builder fees vs. volume (fee attribution
+still working), withdrawal count sanity (an unexpected spike is worth a
+look at `journalctl -u fade`), and your Sentry inbox if configured.
 
 ---
 

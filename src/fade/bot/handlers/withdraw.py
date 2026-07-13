@@ -22,7 +22,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from fade.bot.handlers.common import GROUP_REDIRECT_TEXT, dm_button
-from fade.db.models import WithdrawalAddress
+from fade.db.models import Withdrawal, WithdrawalAddress
 from fade.wallets import InsufficientBalanceError
 
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -228,14 +228,23 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(FAILED_TEXT.format(reason=str(error)[:150]))
         return
 
-    if row is None:  # cooldown off: record after first successful send, as before
-        async with sessions() as session:
+    async with sessions() as session:
+        if row is None:  # cooldown off: record after first successful send, as before
             session.add(
                 WithdrawalAddress(
                     telegram_user_id=user_id, address=address.lower(), confirmed_at=now
                 )
             )
-            await session.commit()
+        # Receipt trail for every completed withdrawal (feeds the F-26 digest).
+        session.add(
+            Withdrawal(
+                telegram_user_id=user_id,
+                address=address.lower(),
+                amount=amount,
+                tx_hash=str(tx_hash)[:66],
+            )
+        )
+        await session.commit()
 
     await query.edit_message_text(
         SENT_TEXT.format(amount=amount, address=address, tx=tx_hash),
