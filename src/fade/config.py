@@ -43,6 +43,9 @@ class Settings:
     telegram_webhook_secret: str = ""
     # Per-user rolling-24h BUY volume ceiling (PRD §7.7). 0 disables. See D-12.
     daily_volume_cap_usd: Decimal = Decimal("1000")
+    # First-time withdrawal-address cooldown, minutes (PRD §7.3). 0 disables
+    # (dev/test default); production should set it — see D-13 and DEPLOYMENT.md.
+    withdrawal_cooldown_minutes: int = 0
     attestation_version: str = field(default="2026-07-04")
 
     def __repr__(self) -> str:  # keep secrets out of logs and tracebacks
@@ -80,4 +83,5 @@ def load_settings() -> Settings:
         polygon_rpc_url=os.environ.get("POLYGON_RPC_URL", "https://1rpc.io/matic"),
         telegram_webhook_secret=os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""),
         daily_volume_cap_usd=Decimal(os.environ.get("FADE_DAILY_VOLUME_CAP_USD") or "1000"),
+        withdrawal_cooldown_minutes=int(os.environ.get("FADE_WITHDRAWAL_COOLDOWN_MINUTES") or "0"),
     )

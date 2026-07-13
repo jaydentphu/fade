@@ -135,7 +135,10 @@ async def test_paused_blocks_every_order_path_but_withdrawals_complete(
     # Withdrawals still complete while paused (F-25).
     await withdraw.withdraw(message_update(), context)
     await withdraw.handle_withdraw_text(message_update("5"), context)
-    dest = "0xAbCd000000000000000000000000000000001234"
+    # Stage 10 fixture correction: same address as before, in its valid EIP-55
+    # form — the old arbitrary mixed casing is now (rightly) rejected as a
+    # failed checksum. The assertion below is unchanged.
+    dest = "0xAbcd000000000000000000000000000000001234"
     await withdraw.handle_withdraw_text(message_update(dest), context)
     confirm = callback_update("wd:yes", update_id=9400)
     await withdraw.confirm_callback(confirm, context)

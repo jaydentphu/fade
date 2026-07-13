@@ -69,6 +69,9 @@ class PositionView:
     cur_price: Decimal | None
     cash_pnl: Decimal | None
     percent_pnl: float | None
+    # Telegram user the card was issued to; 0 = unstamped (legacy cached cards).
+    # The /positions handler stamps it so sell taps can be owner-locked.
+    owner_id: int = 0
 
 
 class TradingService:

@@ -142,3 +142,36 @@ async def test_sell_tap_shows_confirm_then_executes_full_position(
     assert call.kwargs["token_id"] == "111"
     assert call.kwargs["amount"] == Decimal("16.4")
     assert call.kwargs["telegram_update_id"] == 7200
+
+
+async def test_position_card_is_owner_locked(settings, session_factory, onboard):
+    """Stage 10: user A's sell card, tapped by user B, is rejected — nothing
+    executes. Cards are stamped with their owner by the /positions flow itself."""
+    await onboard(USER_ID)
+    update = make_update()
+    context = make_context(settings, session_factory)
+    await positions.positions(update, context)
+
+    card_call = update.message.reply_text.call_args_list[-1]
+    key = card_call.kwargs["reply_markup"].inline_keyboard[0][0].callback_data.split(":")[1]
+
+    intruder_tap = make_callback_update(f"ps:{key}")
+    intruder_tap.effective_user.id = 999  # not the card's owner
+    await positions.sell_callback(intruder_tap, context)
+    intruder_tap.callback_query.answer.assert_awaited_once_with(
+        positions.NOT_YOUR_POSITION_ALERT, show_alert=True
+    )
+    intruder_tap.callback_query.edit_message_text.assert_not_awaited()
+
+    intruder_confirm = make_callback_update(f"psc:{key}", update_id=7300)
+    intruder_confirm.effective_user.id = 999
+    await positions.sell_confirm_callback(intruder_confirm, context)
+    intruder_confirm.callback_query.answer.assert_awaited_once_with(
+        positions.NOT_YOUR_POSITION_ALERT, show_alert=True
+    )
+    context.application.bot_data["trading"].execute_market_order.assert_not_awaited()
+
+    # The rightful owner is unaffected.
+    owner_tap = make_callback_update(f"ps:{key}")
+    await positions.sell_callback(owner_tap, context)
+    assert "Confirm sell" in owner_tap.callback_query.edit_message_text.call_args.args[0]

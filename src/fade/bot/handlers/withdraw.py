@@ -1,5 +1,11 @@
 """/withdraw (PRD F-4). DM-only. First-time addresses require an explicit confirm.
 
+PRD §7.3 hardening (D-13): first-time destinations can carry a cooldown
+(FADE_WITHDRAWAL_COOLDOWN_MINUTES, 0 = off). Registering a new address inside
+the cooldown moves no funds, tells the user when they can complete it, and
+sends an immediate security notice so a hijacked session can't drain quietly.
+Addresses are EIP-55 checksummed wherever rendered (PRD J4).
+
 Money screens throughout: plain and precise. Withdrawals never consult the
 trading pause flag (PRD F-25): they must always work.
 """
@@ -7,9 +13,10 @@ trading pause flag (PRD F-25): they must always work.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
+from eth_utils import is_checksum_address, to_checksum_address
 from sqlalchemy import select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -28,6 +35,26 @@ ASK_ADDRESS_TEXT = (
     "Double-check it: transfers cannot be reversed."
 )
 BAD_ADDRESS_TEXT = "That doesn't look like a valid address (0x + 40 hex characters). Try again."
+BAD_CHECKSUM_TEXT = (
+    "That address fails its checksum — at least one character is mistyped. "
+    "Paste it again exactly as your wallet shows it."
+)
+NEW_ADDRESS_REGISTERED_TEXT = (
+    "New withdrawal address registered:\n\n"
+    "`{address}`\n\n"
+    "For security, first-time addresses have a {minutes}-minute cooldown before funds "
+    "can be sent. Run /withdraw again after {ready} UTC to complete this withdrawal.\n"
+    "No funds have moved."
+)
+NEW_ADDRESS_NOTICE_TEXT = (
+    "Security notice: a new withdrawal address was just added to your account:\n\n"
+    "`{address}`\n\n"
+    "If this wasn't you, use /export now and move your funds."
+)
+COOLDOWN_ACTIVE_TEXT = (
+    "This address is still in its security cooldown. "
+    "You can withdraw to it after {ready} UTC. No funds have moved."
+)
 FIRST_TIME_CONFIRM_TEXT = (
     "First time sending to this address:\n\n"
     "`{address}`\n\n"
@@ -91,9 +118,16 @@ async def handle_withdraw_text(update: Update, context: ContextTypes.DEFAULT_TYP
         if not ADDRESS_RE.match(text):
             await update.message.reply_text(BAD_ADDRESS_TEXT)
             return True
-        state["address"] = text
+        hexpart = text[2:]
+        if hexpart != hexpart.lower() and hexpart != hexpart.upper():
+            # Mixed case carries an EIP-55 checksum claim: verify it.
+            if not is_checksum_address(text):
+                await update.message.reply_text(BAD_CHECKSUM_TEXT)
+                return True
+        address = to_checksum_address(text)
+        state["address"] = address
         state["step"] = "confirm"
-        known = await _address_known(context, update.effective_user.id, text)
+        known = await _known_address_row(context, update.effective_user.id, address) is not None
         template = REPEAT_CONFIRM_TEXT if known else FIRST_TIME_CONFIRM_TEXT
         keyboard = InlineKeyboardMarkup(
             [
@@ -104,7 +138,7 @@ async def handle_withdraw_text(update: Update, context: ContextTypes.DEFAULT_TYP
             ]
         )
         await update.message.reply_text(
-            template.format(address=text, amount=state["amount"]),
+            template.format(address=address, amount=state["amount"]),
             reply_markup=keyboard,
             parse_mode="Markdown",
         )
@@ -113,18 +147,21 @@ async def handle_withdraw_text(update: Update, context: ContextTypes.DEFAULT_TYP
     return False
 
 
-async def _address_known(
+async def _known_address_row(
     context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int, address: str
-) -> bool:
+) -> WithdrawalAddress | None:
     sessions = context.application.bot_data["sessions"]
     async with sessions() as session:
-        row = await session.scalar(
+        return await session.scalar(
             select(WithdrawalAddress).where(
                 WithdrawalAddress.telegram_user_id == telegram_user_id,
                 WithdrawalAddress.address == address.lower(),
             )
         )
-    return row is not None
+
+
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -143,6 +180,44 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     wallets = context.application.bot_data["wallets"]
     sessions = context.application.bot_data["sessions"]
+    settings = context.application.bot_data["settings"]
+
+    # PRD §7.3 / D-13: first-time-destination cooldown. Never consults the
+    # trading pause flag — withdrawal availability is untouched (PRD F-25);
+    # this only staggers the FIRST send to a brand-new destination.
+    cooldown = timedelta(minutes=settings.withdrawal_cooldown_minutes)
+    row = await _known_address_row(context, user_id, address)
+    now = datetime.now(UTC)
+    if cooldown > timedelta(0):
+        if row is None:
+            async with sessions() as session:
+                session.add(
+                    WithdrawalAddress(
+                        telegram_user_id=user_id, address=address.lower(), confirmed_at=now
+                    )
+                )
+                await session.commit()
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=NEW_ADDRESS_NOTICE_TEXT.format(address=address),
+                parse_mode="Markdown",
+            )
+            ready = now + cooldown
+            await query.edit_message_text(
+                NEW_ADDRESS_REGISTERED_TEXT.format(
+                    address=address,
+                    minutes=settings.withdrawal_cooldown_minutes,
+                    ready=f"{ready:%Y-%m-%d %H:%M}",
+                ),
+                parse_mode="Markdown",
+            )
+            return
+        ready = _aware(row.confirmed_at) + cooldown
+        if now < ready:
+            await query.edit_message_text(
+                COOLDOWN_ACTIVE_TEXT.format(ready=f"{ready:%Y-%m-%d %H:%M}")
+            )
+            return
 
     try:
         tx_hash = await wallets.withdraw(user_id, address, amount)
@@ -153,13 +228,11 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(FAILED_TEXT.format(reason=str(error)[:150]))
         return
 
-    if not await _address_known(context, user_id, address):
+    if row is None:  # cooldown off: record after first successful send, as before
         async with sessions() as session:
             session.add(
                 WithdrawalAddress(
-                    telegram_user_id=user_id,
-                    address=address.lower(),
-                    confirmed_at=datetime.now(UTC),
+                    telegram_user_id=user_id, address=address.lower(), confirmed_at=now
                 )
             )
             await session.commit()

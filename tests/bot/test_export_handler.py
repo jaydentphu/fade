@@ -90,3 +90,35 @@ async def test_export_callback_refuses_outside_dm(settings):
 
     context.application.bot_data["wallets"].export_key.assert_not_awaited()
     update.callback_query.edit_message_text.assert_not_awaited()
+
+
+# -- Stage 10: the key message self-deletes ------------------------------------
+
+
+async def test_key_message_schedules_auto_delete(settings):
+    """Revealing the key schedules a one-shot delete of that exact message."""
+    update = make_callback_update()
+    update.callback_query.message.chat_id = USER_ID
+    update.callback_query.message.message_id = 42
+    context = make_context(settings)
+
+    await export.export_callback(update, context)
+
+    context.job_queue.run_once.assert_called_once()
+    args, kwargs = context.job_queue.run_once.call_args
+    assert args[1] == export.EXPORT_DELETE_AFTER_S
+    assert kwargs["data"] == {"chat_id": USER_ID, "message_id": 42}
+    # The copy warns the user it will happen.
+    text = update.callback_query.edit_message_text.call_args.args[0]
+    assert "self-delete" in text
+
+
+async def test_delete_job_tolerates_already_deleted_message(settings):
+    """The user deleting the message first must not crash the job."""
+    context = MagicMock()
+    context.bot.delete_message = AsyncMock(side_effect=Exception("message not found"))
+    context.job.data = {"chat_id": USER_ID, "message_id": 42}
+
+    await export._delete_key_message(context)  # must not raise
+
+    context.bot.delete_message.assert_awaited_once()

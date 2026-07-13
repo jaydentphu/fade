@@ -99,3 +99,33 @@ own, but how fast the backend spends them on their behalf is a blast-radius cont
   incident (re-arms once the user's 24h volume falls back under threshold), and an
   alerting failure never blocks the trade. These numbers are deliberately conservative
   starting points — tune against real traffic, they're not load-bearing guarantees.
+
+## D-13. First-time withdrawal-address cooldown (PRD §7.3's P1 hardening)
+Decided 2026-07-12 during Stage 10 (withdrawal-path security completion). PRD §7.3
+lists "a cooldown + notification when the destination changes" as P1; this implements
+it for the case that matters (a destination the user has never withdrawn to before).
+
+- **Cooldown = `FADE_WITHDRAWAL_COOLDOWN_MINUTES`, code default `0` (off),
+  recommended production value `60`.** The default is 0 solely so dev and the
+  existing test suite behave byte-identically to pre-D-13 behavior; production is
+  expected to set it (documented in DEPLOYMENT.md §2 and .env.example). 60 minutes
+  was chosen because the threat is a hijacked Telegram session (Telegram account
+  takeover, stolen unlocked phone) draining a wallet to an attacker address in
+  seconds: an hour gives the real owner — who is DM-notified the instant the new
+  address is registered — time to see the notice and use /export to move funds,
+  while costing a legitimate user setting up a new exchange address one hour once
+  per address, ever. Repeat withdrawals to known addresses are never delayed.
+- **Registering a new address always sends an immediate security-notice DM**
+  ("if this wasn't you, use /export now and move your funds"), even though the
+  registration reply is itself a DM — the notice is a separate message so it
+  survives the user's own flow context and reads as an alert, per PRD §7.3's
+  notification requirement. Plain money-screen language, no brand voice.
+- **With cooldown off (0), behavior is exactly pre-D-13:** the address is recorded
+  only after the first successful send, and no notice is sent. The cooldown never
+  consults the trading pause flag — withdrawals stay independent of the kill
+  switch (PRD F-25).
+- Same stage also shipped (not separate decisions, recorded for the register):
+  EIP-55 checksum rendering + validation on withdrawal addresses (PRD J4's
+  "checksummed" promise; mixed-case input with a wrong checksum is rejected),
+  /export key messages self-deleting after 5 minutes, and owner-locking on
+  /positions sell cards (a card issued to user A rejects taps from user B).

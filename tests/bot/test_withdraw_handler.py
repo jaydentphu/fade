@@ -14,13 +14,19 @@ from fade.db.models import TradingPauseFlag, WithdrawalAddress
 
 USER_ID = 803
 WALLET = "0xFadE0000000000000000000000000000000000aa"
-DEST = "0xAbCd000000000000000000000000000000001234"
+# NOTE (Stage 10): this constant changed from "0xAbCd...1234" to the EIP-55
+# checksummed form of the SAME address. The old casing was arbitrary mock
+# casing that happens to be an invalid checksum, which the handler now
+# rightly rejects — the fixture had to become a valid input, the assertions
+# it feeds are unchanged.
+DEST = "0xAbcd000000000000000000000000000000001234"
 TX_HASH = "0x" + "cd" * 32
 
 
 def make_context(settings, session_factory) -> MagicMock:
     context = MagicMock()
     context.bot.username = "fadetest_bot"
+    context.bot.send_message = AsyncMock()
     context.user_data = {}
     wallets = MagicMock()
     wallets.get_wallet_address = AsyncMock(return_value=WALLET)
@@ -172,3 +178,149 @@ async def test_bad_amount_and_address_are_rejected(settings, session_factory, on
     bad_address = make_update("not-an-address")
     await withdraw.handle_withdraw_text(bad_address, context)
     assert bad_address.message.reply_text.call_args.args[0] == withdraw.BAD_ADDRESS_TEXT
+
+
+# -- Stage 10: EIP-55 checksum rendering and validation (PRD J4) ---------------
+
+
+async def test_lowercase_address_renders_checksummed(settings, session_factory, onboard):
+    """A lowercase-entered address is displayed in its EIP-55 checksummed form."""
+    await onboard(USER_ID)
+    context = make_context(settings, session_factory)
+
+    await withdraw.withdraw(make_update(), context)
+    await withdraw.handle_withdraw_text(make_update("25"), context)
+    address_msg = make_update(DEST.lower())
+    await withdraw.handle_withdraw_text(address_msg, context)
+
+    text = address_msg.message.reply_text.call_args.args[0]
+    assert DEST in text  # DEST is the checksummed form
+    assert DEST.lower() not in text.replace(DEST, "")
+
+    confirm = make_callback_update("wd:yes")
+    await withdraw.confirm_callback(confirm, context)
+    receipt = confirm.callback_query.edit_message_text.call_args.args[0]
+    assert DEST in receipt  # receipt checksummed too
+
+
+async def test_invalid_mixed_case_checksum_is_rejected(settings, session_factory, onboard):
+    """Mixed-case input carries a checksum claim; a wrong one is re-prompted."""
+    await onboard(USER_ID)
+    context = make_context(settings, session_factory)
+    await withdraw.withdraw(make_update(), context)
+    await withdraw.handle_withdraw_text(make_update("25"), context)
+
+    # Same address as DEST but with a deliberately wrong case pattern.
+    bad = make_update("0xAbCd000000000000000000000000000000001234")
+    assert await withdraw.handle_withdraw_text(bad, context)
+
+    assert bad.message.reply_text.call_args.args[0] == withdraw.BAD_CHECKSUM_TEXT
+    assert context.user_data["withdraw"]["step"] == "address"  # still waiting for a valid one
+    context.application.bot_data["wallets"].withdraw.assert_not_awaited()
+
+
+# -- Stage 10: first-time-address cooldown (PRD §7.3, D-13) ---------------------
+
+
+def guarded(settings, minutes: int = 60):
+    from dataclasses import replace
+
+    return replace(settings, withdrawal_cooldown_minutes=minutes)
+
+
+async def test_first_time_address_inside_cooldown_blocks_and_notifies(
+    settings, session_factory, onboard
+):
+    """Inside the cooldown: no funds move, the address is registered, and a
+    security notice DM is sent immediately."""
+    await onboard(USER_ID)
+    context = make_context(guarded(settings), session_factory)
+    await run_flow_to_confirm(context)
+
+    confirm = make_callback_update("wd:yes")
+    await withdraw.confirm_callback(confirm, context)
+
+    context.application.bot_data["wallets"].withdraw.assert_not_awaited()
+    async with session_factory() as session:
+        row = await session.scalar(select(WithdrawalAddress))
+    assert row is not None and row.address == DEST.lower()
+
+    notice = context.bot.send_message.call_args.kwargs["text"]
+    assert "new withdrawal address" in notice.lower()
+    assert "/export" in notice  # "if this wasn't you" escape hatch
+
+    told = confirm.callback_query.edit_message_text.call_args.args[0]
+    assert "cooldown" in told and "No funds have moved" in told
+
+
+async def test_same_address_after_cooldown_window_works(settings, session_factory, onboard):
+    """The registered address becomes withdrawable once the window has passed."""
+    from datetime import UTC, datetime, timedelta
+
+    await onboard(USER_ID)
+    context = make_context(guarded(settings), session_factory)
+
+    # First attempt registers the address (blocked, per the previous test).
+    await run_flow_to_confirm(context)
+    await withdraw.confirm_callback(make_callback_update("wd:yes"), context)
+    context.application.bot_data["wallets"].withdraw.assert_not_awaited()
+
+    # The cooldown elapses.
+    async with session_factory() as session:
+        row = await session.scalar(select(WithdrawalAddress))
+        row.confirmed_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=61)
+        await session.commit()
+
+    await run_flow_to_confirm(context)
+    confirm = make_callback_update("wd:yes")
+    await withdraw.confirm_callback(confirm, context)
+
+    context.application.bot_data["wallets"].withdraw.assert_awaited_once_with(
+        USER_ID, DEST, Decimal("25")
+    )
+    assert "Withdrawal submitted" in confirm.callback_query.edit_message_text.call_args.args[0]
+
+
+async def test_previously_used_address_is_unaffected_by_cooldown(
+    settings, session_factory, onboard
+):
+    """An address with real history predates the cooldown entirely."""
+    from datetime import UTC, datetime, timedelta
+
+    await onboard(USER_ID)
+    context = make_context(guarded(settings), session_factory)
+    async with session_factory() as session:
+        session.add(
+            WithdrawalAddress(
+                telegram_user_id=USER_ID,
+                address=DEST.lower(),
+                confirmed_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30),
+            )
+        )
+        await session.commit()
+
+    await run_flow_to_confirm(context)
+    confirm = make_callback_update("wd:yes")
+    await withdraw.confirm_callback(confirm, context)
+
+    context.application.bot_data["wallets"].withdraw.assert_awaited_once()
+    context.bot.send_message.assert_not_awaited()  # no security notice for known addresses
+
+
+async def test_cooldown_zero_preserves_existing_behavior(settings, session_factory, onboard):
+    """Default (0 = off): first-time address executes immediately and is
+    recorded after the send, exactly as before Stage 10."""
+    await onboard(USER_ID)
+    context = make_context(settings, session_factory)  # default cooldown 0
+    await run_flow_to_confirm(context)
+
+    confirm = make_callback_update("wd:yes")
+    await withdraw.confirm_callback(confirm, context)
+
+    context.application.bot_data["wallets"].withdraw.assert_awaited_once_with(
+        USER_ID, DEST, Decimal("25")
+    )
+    context.bot.send_message.assert_not_awaited()  # no cooldown notice in off mode
+    async with session_factory() as session:
+        row = await session.scalar(select(WithdrawalAddress))
+    assert row is not None and row.address == DEST.lower()

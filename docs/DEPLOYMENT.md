@@ -38,7 +38,21 @@ FADE_BUILDER_CODE=...             # public, from the builder dashboard
 FADE_BUILDER_API_KEY=...          # + SECRET + PASSPHRASE, from the builder dashboard
 RELAYER_API_KEY=... / _ADDRESS=...
 POLYGON_RPC_URL=...               # use a keyed provider (Alchemy/Infura) in prod, not a public one
+FADE_WITHDRAWAL_COOLDOWN_MINUTES=60  # see below — 0 (off) is a dev default, not a prod one
 ```
+
+**Withdrawal cooldown (`FADE_WITHDRAWAL_COOLDOWN_MINUTES`, recommend `60` in
+prod):** first-time withdrawal destinations wait this many minutes between
+being registered and being able to receive funds, and registering one
+immediately DMs the account owner (PRD §7.3, docs/DECISIONS.md D-13). This is
+the difference between a hijacked Telegram session draining a wallet silently
+in seconds versus the real owner getting a notice and a one-hour window to
+`/export` and move funds first. 60 minutes is long enough to read a
+notification and act, short enough that a legitimate user setting up a new
+exchange deposit address isn't meaningfully blocked (they confirm, get a
+"ready at HH:MM" time, and come back). The default is `0` (off) only so dev
+and the test suite behave exactly as before this feature existed — set it
+explicitly in prod.
 
 Generate the webhook secret:
 

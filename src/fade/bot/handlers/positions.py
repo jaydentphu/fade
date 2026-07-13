@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -13,6 +14,7 @@ from fade.bot.handlers.trade import NOT_ONBOARDED_TEXT, render_result, user_onbo
 
 NO_POSITIONS_TEXT = "No open positions. Paste a Polymarket link to change that."
 FETCHING_TEXT = "Fetching positions..."
+NOT_YOUR_POSITION_ALERT = "That position belongs to someone else."
 SELL_CONFIRM_TEXT = (
     "Confirm sell (market order, fill-or-kill):\n\n"
     "Sell {shares} {outcome} — {title}\n"
@@ -68,6 +70,8 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     for view in views:
+        # Stamp the card with its owner so sell taps can be owner-locked.
+        view = replace(view, owner_id=update.effective_user.id)
         key = await _cache_position(context, view)
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Sell", callback_data=f"ps:{key}")]])
         await update.message.reply_text(render_position_line(view), reply_markup=keyboard)
@@ -77,14 +81,18 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def sell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sell tapped: show a confirm step for selling the full position."""
     query = update.callback_query
-    if query is None or query.data is None:
+    if query is None or query.data is None or update.effective_user is None:
         return
-    await query.answer()
     key = query.data.split(":")[1]
     view = await _get_position(context, key)
     if view is None:
+        await query.answer()
         await query.edit_message_text("That card expired. Run /positions again.")
         return
+    if view.owner_id and update.effective_user.id != view.owner_id:
+        await query.answer(NOT_YOUR_POSITION_ALERT, show_alert=True)
+        return
+    await query.answer()
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -105,12 +113,16 @@ async def sell_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     if query is None or query.data is None or update.effective_user is None:
         return
-    await query.answer()
     key = query.data.split(":")[1]
     view = await _get_position(context, key)
     if view is None:
+        await query.answer()
         await query.edit_message_text("That card expired. Run /positions again.")
         return
+    if view.owner_id and update.effective_user.id != view.owner_id:
+        await query.answer(NOT_YOUR_POSITION_ALERT, show_alert=True)
+        return
+    await query.answer()
 
     trading = context.application.bot_data["trading"]
     result = await trading.execute_market_order(
