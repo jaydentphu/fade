@@ -48,6 +48,27 @@ def create_webhook_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/miniapp")
+    async def miniapp_page() -> Response:
+        from fade.miniapp import MINIAPP_HTML
+
+        return Response(content=MINIAPP_HTML, media_type="text/html")
+
+    @app.post("/miniapp/register")
+    async def miniapp_register(request: Request) -> Response:
+        from fade.miniapp import handle_register
+
+        try:
+            body = await request.json()
+        except Exception:
+            return Response(status_code=400, content="bad request")
+        return await handle_register(
+            application.bot_data["sessions"],
+            application.bot_data["wallets"],
+            settings.telegram_bot_token,
+            body,
+        )
+
     @app.post(WEBHOOK_PATH)
     async def telegram_webhook(
         request: Request,

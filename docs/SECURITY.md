@@ -61,3 +61,23 @@ without Fade, forever. You are never trapped.
 One person (the builder), honestly. Target uptime is 99.5%, not five nines.
 Fade earns a 1% builder fee on executed trades, paid by Polymarket — there
 are no other fees, and no custom fee code exists in this bot.
+
+## Custody modes (PRD §7.8)
+
+Fade has two wallet custody modes; both can coexist.
+
+**Server custody (the classic mode, and today's default).** Everything above
+describes it: Fade holds an encrypted signing key in a separate store, can
+place orders with it, and `/export` hands it to you whenever you want out.
+The residual risk is stated honestly above — a full server compromise
+including the encryption key could misuse signing keys.
+
+**Client custody (Mini App, flag-gated rollout).** New wallets are created in
+a Telegram Mini App: the key is generated in your device's browser and only
+the public address is sent to Fade. The server never sees, stores, or can
+recover the key — `/export` for these wallets tells you exactly that. The
+trade-off in the current build: server-signed trading and withdrawals are not
+yet supported for client-custody wallets (Fade can't sign with a key it
+doesn't have); that support arrives with the in-app signing round-trip.
+Until then this mode is off by default (`FADE_MINIAPP_CUSTODY`), and the
+classic mode keeps working unchanged.

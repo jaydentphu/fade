@@ -11,7 +11,7 @@ import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import ContextTypes
 
 from fade.bot.handlers.basic import COMMANDS_TEXT
@@ -40,6 +40,14 @@ RESUME_SETUP_TEXT = (
 )
 
 CREATING_TEXT = "Setting up your wallet. This takes a few seconds."
+
+MINIAPP_CUSTODY_TEXT = (
+    "Attestation recorded.\n\n"
+    "Tap below to create your wallet. The signing key is generated on YOUR "
+    "device and never touches Fade's server — Fade cannot export, move, or "
+    "recover it for you, so back it up when prompted."
+)
+MINIAPP_BUTTON_LABEL = "Create wallet (key stays on your device)"
 
 CREATION_FAILED_TEXT = (
     "Wallet setup failed. Nothing was lost — tap below to try again. "
@@ -164,6 +172,23 @@ async def attest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             user.attestation_accepted_at = datetime.now(UTC)
             user.attestation_version = settings.attestation_version
         await session.commit()
+
+    # PRD §7.8 Mini App custody (flag-gated, default off): NEW users create
+    # their key client-side instead of the server minting a signer. With the
+    # flag off this branch does not exist — the classic flow is untouched.
+    if settings.miniapp_custody and settings.miniapp_url:
+        if await wallets.get_wallet_address(tg_user.id) is None:
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            MINIAPP_BUTTON_LABEL, web_app=WebAppInfo(url=settings.miniapp_url)
+                        )
+                    ]
+                ]
+            )
+            await query.edit_message_text(MINIAPP_CUSTODY_TEXT, reply_markup=keyboard)
+            return
 
     await query.edit_message_text(CREATING_TEXT)
     try:

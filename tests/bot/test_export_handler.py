@@ -20,6 +20,7 @@ def make_context(settings) -> MagicMock:
     context.bot.username = "fadetest_bot"
     wallets = MagicMock()
     wallets.get_wallet_address = AsyncMock(return_value=WALLET)
+    wallets.get_custody = AsyncMock(return_value="server")  # classic mode
     wallets.export_key = AsyncMock(return_value=FAKE_KEY)
     context.application.bot_data = {"settings": settings, "wallets": wallets}
     return context

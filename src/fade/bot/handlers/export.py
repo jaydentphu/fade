@@ -21,6 +21,14 @@ EXPORT_DELETE_AFTER_S = 300  # the key message self-deletes after 5 minutes
 
 NOT_ONBOARDED_TEXT = "No wallet yet. Run /start first."
 
+NO_SERVER_KEY_TEXT = (
+    "Fade's server does not hold a key for this wallet.\n\n"
+    "Your key was generated on your device when you created the wallet and "
+    "was never sent to us — so there is nothing to export here. That's the "
+    "point of this custody mode: it's already yours, and only yours. Check "
+    "the backup you made when you created it."
+)
+
 WARNING_TEXT = (
     "⚠️ You are about to export the private key that controls your funds.\n\n"
     "- Anyone who sees this key can take everything in your wallet, instantly "
@@ -53,6 +61,10 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     wallets = context.application.bot_data["wallets"]
     if await wallets.get_wallet_address(update.effective_user.id) is None:
         await update.message.reply_text(NOT_ONBOARDED_TEXT)
+        return
+    if await wallets.get_custody(update.effective_user.id) == "client":
+        # Mini App custody (PRD §7.8): the server never had the key.
+        await update.message.reply_text(NO_SERVER_KEY_TEXT)
         return
 
     keyboard = InlineKeyboardMarkup(

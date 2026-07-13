@@ -55,6 +55,10 @@ class Wallet(Base):
     )
     # Public on-chain address only. Never key material.
     deposit_wallet_address: Mapped[str] = mapped_column(String(42), unique=True)
+    # "server" = classic flow (encrypted signer in the signing store);
+    # "client" = Mini App custody (PRD §7.8): the key was generated on the
+    # user's device and the server NEVER had it.
+    custody: Mapped[str] = mapped_column(String(16), default="server", server_default="server")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="wallet")

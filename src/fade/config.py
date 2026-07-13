@@ -50,6 +50,10 @@ class Settings:
     # Optional Sentry DSN for error reporting; empty = Sentry off (see F-26
     # monitoring in DEPLOYMENT.md). Requires the "sentry" optional dependency.
     sentry_dsn: str = ""
+    # PRD §7.8 Mini App custody (engineering slice). Default OFF: the classic
+    # server-side signer flow is byte-identical while this is false.
+    miniapp_custody: bool = False
+    miniapp_url: str = ""  # public https URL of the Mini App page (required if on)
     attestation_version: str = field(default="2026-07-04")
 
     def __repr__(self) -> str:  # keep secrets out of logs and tracebacks
@@ -89,4 +93,6 @@ def load_settings() -> Settings:
         daily_volume_cap_usd=Decimal(os.environ.get("FADE_DAILY_VOLUME_CAP_USD") or "1000"),
         withdrawal_cooldown_minutes=int(os.environ.get("FADE_WITHDRAWAL_COOLDOWN_MINUTES") or "0"),
         sentry_dsn=os.environ.get("SENTRY_DSN", ""),
+        miniapp_custody=os.environ.get("FADE_MINIAPP_CUSTODY", "").lower() in ("1", "true", "yes"),
+        miniapp_url=os.environ.get("FADE_MINIAPP_URL", ""),
     )

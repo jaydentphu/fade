@@ -28,6 +28,13 @@ SECURITY_TEXT = (
     "auditable signing module, an instant kill switch that can pause trading "
     "but can never block withdrawals — and /export, which hands you your own "
     "key so you can leave any time.\n\n"
+    "Custody modes: today's wallets use the server-held encrypted key "
+    "described above. A second mode is being built where your key is "
+    "generated on YOUR device in a Telegram Mini App and never touches "
+    "Fade's server at all — Fade can't export, move, or lose it. In that "
+    "mode, trading and withdrawals through the bot aren't supported yet "
+    "(the server can't sign for a key it doesn't have); it's rolling out "
+    "gradually, and the classic mode keeps working either way.\n\n"
     "Don't deposit more than you'd bet with friends. Full write-up: "
     "docs/SECURITY.md in the repo."
 )

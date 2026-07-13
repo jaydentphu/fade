@@ -27,9 +27,28 @@ if TYPE_CHECKING:
 
 PUSD_DECIMALS = Decimal(10) ** 6
 
+CUSTODY_SERVER = "server"
+CUSTODY_CLIENT = "client"
+
+CLIENT_CUSTODY_MESSAGE = (
+    "This wallet's key lives on your device, not on Fade's server. "
+    "Server-signed trading and withdrawals are not supported for it in this "
+    "build yet."
+)
+
 
 class InsufficientBalanceError(RuntimeError):
     pass
+
+
+class ClientCustodyError(RuntimeError):
+    """A server-signed action was attempted on a client-custody wallet.
+
+    Raised BEFORE any state change: the server has no key for these wallets
+    (PRD §7.8 — that's the point), so it cannot sign. Trading/withdrawal
+    support for client custody arrives with the Mini App signing round-trip,
+    not this slice.
+    """
 
 
 class WalletService:
@@ -65,6 +84,41 @@ class WalletService:
             await session.commit()
         return address
 
+    async def register_client_wallet(self, telegram_user_id: int, address: str) -> str:
+        """Register a Mini App custody wallet (PRD §7.8): the key was generated
+        in the user's browser and NEVER reaches this server — no signer is
+        created, nothing touches the signing store. Idempotent like
+        create_wallet. The address stored is the client signer's address;
+        deposit-wallet derivation joins the signing round-trip work, not this
+        slice (the flag is off by default and nothing trades through these yet).
+        """
+        async with self._sessions() as session:
+            existing = await session.scalar(
+                select(Wallet).where(Wallet.telegram_user_id == telegram_user_id)
+            )
+            if existing is not None:
+                return existing.deposit_wallet_address
+            session.add(
+                Wallet(
+                    telegram_user_id=telegram_user_id,
+                    deposit_wallet_address=address,
+                    custody=CUSTODY_CLIENT,
+                )
+            )
+            await session.commit()
+        return address
+
+    async def get_custody(self, telegram_user_id: int) -> str | None:
+        async with self._sessions() as session:
+            wallet = await session.scalar(
+                select(Wallet).where(Wallet.telegram_user_id == telegram_user_id)
+            )
+        return wallet.custody if wallet else None
+
+    async def _require_server_custody(self, telegram_user_id: int) -> None:
+        if await self.get_custody(telegram_user_id) == CUSTODY_CLIENT:
+            raise ClientCustodyError(CLIENT_CUSTODY_MESSAGE)
+
     async def get_wallet_address(self, telegram_user_id: int) -> str | None:
         async with self._sessions() as session:
             wallet = await session.scalar(
@@ -88,8 +142,10 @@ class WalletService:
         """Withdraw pUSD as USDC (Polygon) to `recipient`. Returns the tx hash.
 
         Works regardless of the trading pause flag (PRD F-25): nothing here
-        consults it, by design.
+        consults it, by design. Client-custody wallets are refused up front —
+        the server can't sign for them (see ClientCustodyError).
         """
+        await self._require_server_custody(telegram_user_id)
         wallet_address = await self.get_wallet_address(telegram_user_id)
         if wallet_address is None:
             raise KeyError(f"User {telegram_user_id} has no wallet")
@@ -117,12 +173,17 @@ class WalletService:
 
         Only the /export handler may call this, after its warning flow. The
         value goes straight into a DM to the key's owner and is never logged.
+        Client-custody wallets have no server-held key to export, ever.
         """
+        await self._require_server_custody(telegram_user_id)
         return await self._signing.get_private_key(telegram_user_id)
 
     @asynccontextmanager
     async def secure_client(self, telegram_user_id: int) -> AsyncIterator[AsyncSecureClient]:
-        """Authenticated client for one action. The key never leaves this scope."""
+        """Authenticated client for one action. The key never leaves this scope.
+        Refuses client-custody wallets BEFORE touching the signing store — the
+        server holds no key for them and must never pretend otherwise."""
+        await self._require_server_custody(telegram_user_id)
         private_key = await self._signing.get_private_key(telegram_user_id)
         client = await AsyncSecureClient.create(private_key=private_key, api_key=self._relayer_key)
         del private_key
@@ -135,4 +196,12 @@ class WalletService:
         await self._signing.close()
 
 
-__all__ = ["PUSD_DECIMALS", "InsufficientBalanceError", "WalletService"]
+__all__ = [
+    "CLIENT_CUSTODY_MESSAGE",
+    "CUSTODY_CLIENT",
+    "CUSTODY_SERVER",
+    "PUSD_DECIMALS",
+    "ClientCustodyError",
+    "InsufficientBalanceError",
+    "WalletService",
+]
