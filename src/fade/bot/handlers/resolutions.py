@@ -25,6 +25,7 @@ from telegram.ext import ContextTypes
 
 from fade.bot.handlers.common import sanitize
 from fade.db.models import Resolution, Wallet
+from fade.errors import ErrorReporter, report_safely
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,11 @@ class ResolutionScanner:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         fetch: Callable[[str], Any],
+        reporter: ErrorReporter | None = None,
     ) -> None:
         self._sessions = session_factory
         self._fetch = fetch
+        self._reporter = reporter
 
     async def scan_once(self, bot: Any) -> int:
         """Detect and notify newly resolved positions. Returns DMs sent."""
@@ -113,14 +116,22 @@ class ResolutionScanner:
                 return False  # already recorded (earlier poll or pre-restart)
 
         template = CROWN_TEXT if won else ROAST_TEXT
-        await bot.send_message(
-            chat_id=telegram_user_id,
-            text=template.format(
-                title=sanitize(position.title),
-                pnl=f"{abs(pnl):.2f}",
-                shares=position.shares,
-            ),
-        )
+        # One user's failed DM (blocked bot, Telegram error) must not abort the
+        # scan for everyone else. The Resolution row already exists, so nothing
+        # is retried: at-most-once notification, loop keeps going (Stage 11).
+        try:
+            await bot.send_message(
+                chat_id=telegram_user_id,
+                text=template.format(
+                    title=sanitize(position.title),
+                    pnl=f"{abs(pnl):.2f}",
+                    shares=position.shares,
+                ),
+            )
+        except Exception as error:
+            logger.exception("resolution DM failed for user %s", telegram_user_id)
+            await report_safely(self._reporter, error, user_id=telegram_user_id)
+            return False
         if won:
             await self._send_flex_card(bot, telegram_user_id, position, pnl)
         return True
@@ -132,14 +143,20 @@ class ResolutionScanner:
 
         try:
             image = generate_flex_card(position, pnl)
-        except Exception:
+        except Exception as error:
             logger.exception("flex card generation failed for %s", telegram_user_id)
+            await report_safely(self._reporter, error, user_id=telegram_user_id)
             return
-        await bot.send_photo(
-            chat_id=telegram_user_id,
-            photo=image,
-            caption="Called it. Share the receipt.",
-        )
+        try:
+            await bot.send_photo(
+                chat_id=telegram_user_id,
+                photo=image,
+                caption="Called it. Share the receipt.",
+            )
+        except Exception as error:
+            # The crown DM already landed; losing the flex card is cosmetic.
+            logger.exception("flex card send failed for user %s", telegram_user_id)
+            await report_safely(self._reporter, error, user_id=telegram_user_id)
 
 
 async def fetch_resolved_positions(address: str) -> list[ResolvedPosition]:
@@ -176,4 +193,8 @@ async def scan_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # F-24 settlement rides this job: the Resolution rows just recorded are
     # what decides accepted challenges; stale proposals expire on the same tick.
-    await settle_and_expire(context.application.bot_data["sessions"], context.bot)
+    await settle_and_expire(
+        context.application.bot_data["sessions"],
+        context.bot,
+        reporter=context.application.bot_data.get("error_reporter"),
+    )

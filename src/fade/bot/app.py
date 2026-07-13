@@ -45,6 +45,8 @@ DEPOSIT_SCAN_INTERVAL_S = 30
 BROADCAST_DRAIN_INTERVAL_S = 3
 # Resolutions settle slowly (hours/days after close): 5 minutes is plenty.
 RESOLUTION_SCAN_INTERVAL_S = 300
+# Expired UI cards get physically deleted this often (TTL is 24h; hourly is plenty).
+CARD_PURGE_INTERVAL_S = 3600
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,14 @@ async def _log_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def _broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.application.bot_data["broadcasts"].drain_once()
+
+
+async def _card_purge_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Hourly cleanup of expired UI cards (Stage 11: the table otherwise grows
+    forever — expiry was only ever checked at read time)."""
+    removed = await context.application.bot_data["cards"].purge_expired()
+    if removed:
+        logger.info("purged %d expired ui cards", removed)
 
 
 async def _league_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -103,18 +113,35 @@ def build_application(settings: Settings) -> Application:
         if settings.admin_user_id:
             await app.bot.send_message(chat_id=settings.admin_user_id, text=text)
 
+    # Default no-op; a prod build can replace with a Sentry-backed reporter.
+    # Wired first so the background loops below can report caught failures.
+    reporter = NullErrorReporter()
+    app.bot_data["error_reporter"] = reporter
+
+    async def _deactivate_clan(chat_id: int) -> None:
+        # Bot removed from the chat (Forbidden): deactivate, don't delete —
+        # leaderboard/record history references this clan's members.
+        from fade.db.models import Clan
+
+        async with sessions() as session:
+            clan = await session.get(Clan, chat_id)
+            if clan is not None and clan.active:
+                clan.active = False
+                await session.commit()
+                logger.warning("clan %s deactivated: bot was removed from the chat", chat_id)
+
     app.bot_data["trading"] = TradingService(settings, sessions, wallets, alert=_admin_alert)
     app.bot_data["deposit_scanner"] = deposits.DepositScanner(
-        deposits.Rpc(settings.polygon_rpc_url), sessions
+        deposits.Rpc(settings.polygon_rpc_url), sessions, reporter=reporter
     )
     app.bot_data["resolution_scanner"] = resolutions.ResolutionScanner(
-        sessions, fetch=resolutions.fetch_resolved_positions
+        sessions, fetch=resolutions.fetch_resolved_positions, reporter=reporter
     )
-    app.bot_data["broadcasts"] = BroadcastQueue(send=app.bot.send_message)
+    app.bot_data["broadcasts"] = BroadcastQueue(
+        send=app.bot.send_message, on_forbidden=_deactivate_clan, reporter=reporter
+    )
     # DB-backed so in-flight trade cards survive a restart (memory is the fast path).
     app.bot_data["cards"] = CardStore(session_factory=sessions)
-    # Default no-op; a prod build can replace with a Sentry-backed reporter.
-    app.bot_data["error_reporter"] = NullErrorReporter()
 
     # Commands
     app.add_handler(CommandHandler("start", onboarding.start))
@@ -170,6 +197,7 @@ def build_application(settings: Settings) -> Application:
     app.add_error_handler(_log_error)
 
     if app.job_queue is not None:
+        app.job_queue.run_repeating(_card_purge_job, interval=CARD_PURGE_INTERVAL_S, first=120)
         app.job_queue.run_repeating(deposits.scan_job, interval=DEPOSIT_SCAN_INTERVAL_S, first=10)
         app.job_queue.run_repeating(
             _broadcast_job, interval=BROADCAST_DRAIN_INTERVAL_S, first=BROADCAST_DRAIN_INTERVAL_S

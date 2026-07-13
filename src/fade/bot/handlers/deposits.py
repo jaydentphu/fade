@@ -8,6 +8,7 @@ table so nothing is credited twice.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -18,6 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from telegram.ext import ContextTypes
 
 from fade.db.models import ChainScanState, Deposit, Wallet
+from fade.errors import ErrorReporter, report_safely
+
+logger = logging.getLogger(__name__)
 
 TOKENS = {
     "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": "USDC.e",
@@ -86,10 +90,12 @@ class DepositScanner:
         rpc: Rpc,
         session_factory: async_sessionmaker[AsyncSession],
         confirmations: int = 12,
+        reporter: ErrorReporter | None = None,
     ) -> None:
         self._rpc = rpc
         self._sessions = session_factory
         self._confirmations = confirmations
+        self._reporter = reporter
 
     async def scan_once(self, bot: Any) -> None:
         head = await self._rpc.block_number()
@@ -149,12 +155,24 @@ class DepositScanner:
         for deposit in pending:
             if head - deposit.block_number + 1 < self._confirmations:
                 continue
+            # Send BEFORE marking: a failed DM (user blocked the bot, Telegram
+            # hiccup) leaves the deposit pending so the next scan retries it,
+            # and one user's failure never blocks the rest of the loop.
+            try:
+                await bot.send_message(
+                    chat_id=deposit.telegram_user_id,
+                    text=DEPOSIT_CONFIRMED_TEXT.format(amount=deposit.amount, token=deposit.token),
+                )
+            except Exception as error:
+                logger.exception(
+                    "deposit confirm DM failed for user %s (tx %s); will retry next scan",
+                    deposit.telegram_user_id,
+                    deposit.tx_hash,
+                )
+                await report_safely(self._reporter, error, user_id=deposit.telegram_user_id)
+                continue
             deposit.status = "confirmed"
             deposit.confirmed_at = datetime.now(UTC)
-            await bot.send_message(
-                chat_id=deposit.telegram_user_id,
-                text=DEPOSIT_CONFIRMED_TEXT.format(amount=deposit.amount, token=deposit.token),
-            )
 
 
 async def scan_job(context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -10,6 +10,8 @@ Application.process_update pipeline that polling uses.
 
 from __future__ import annotations
 
+import json
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, Request, Response
@@ -17,6 +19,8 @@ from telegram import Update
 
 from fade.bot.app import build_application
 from fade.config import Settings, load_settings
+
+logger = logging.getLogger(__name__)
 
 SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 WEBHOOK_PATH = "/telegram/webhook"
@@ -49,14 +53,32 @@ def create_webhook_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         x_telegram_bot_api_secret_token: str | None = Header(default=None),
     ) -> Response:
-        return await handle_webhook_request(
+        return await handle_webhook_raw(
             application,
             app.state.webhook_secret,
             x_telegram_bot_api_secret_token,
-            await request.json(),
+            await request.body(),
         )
 
     return app
+
+
+async def handle_webhook_raw(
+    application,
+    expected_secret: str,
+    provided_secret: str | None,
+    raw_body: bytes,
+) -> Response:
+    """Secret check first (cheapest rejection), then JSON parsing: a body that
+    isn't valid JSON is a 400, never a 500, and never touches the Application."""
+    if not expected_secret or provided_secret != expected_secret:
+        return Response(status_code=401, content="unauthorized")
+    try:
+        body = json.loads(raw_body)
+    except (ValueError, UnicodeDecodeError):
+        logger.warning("webhook body was not valid JSON; rejected 400")
+        return Response(status_code=400, content="bad request")
+    return await handle_webhook_request(application, expected_secret, provided_secret, body)
 
 
 async def handle_webhook_request(
@@ -71,6 +93,17 @@ async def handle_webhook_request(
     # absence of a configured secret as "reject everything" rather than "allow".
     if not expected_secret or provided_secret != expected_secret:
         return Response(status_code=401, content="unauthorized")
-    update = Update.de_json(body, application.bot)
+    # Plausibility gate: every real Telegram update is an object with an
+    # integer update_id. Anything else is rejected before the Application.
+    if not isinstance(body, dict) or not isinstance(body.get("update_id"), int):
+        logger.warning("webhook body was not a plausible Telegram update; rejected 400")
+        return Response(status_code=400, content="bad request")
+    try:
+        update = Update.de_json(body, application.bot)
+    except Exception:
+        logger.warning("webhook body failed Update parsing; rejected 400", exc_info=True)
+        return Response(status_code=400, content="bad request")
+    if update is None:
+        return Response(status_code=400, content="bad request")
     await application.process_update(update)
     return Response(status_code=200, content="ok")

@@ -122,13 +122,20 @@ class WithdrawalAddress(Base):
 
 
 class Clan(Base):
-    """A group chat registered via /setup (PRD F-16)."""
+    """A group chat registered via /setup (PRD F-16).
+
+    `active=False` means the bot was removed from the chat (Telegram Forbidden
+    on send): broadcasts, league announcements, and challenge settlements skip
+    it. Deactivation instead of deletion preserves leaderboard/record history
+    (orders, fade_events, resolutions all reference this chat's members).
+    """
 
     __tablename__ = "clans"
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     title: Mapped[str] = mapped_column(String(128))
     created_by: Mapped[int] = mapped_column(BigInteger)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

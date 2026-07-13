@@ -9,23 +9,32 @@ Group-rendered text NEVER includes balances or wallet addresses (PRD F-7).
 from __future__ import annotations
 
 import inspect
+import logging
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
+from telegram.error import Forbidden
 
 from fade.bot.handlers.common import sanitize
 from fade.db.models import ClanMember, User
+from fade.errors import ErrorReporter, report_safely
+
+logger = logging.getLogger(__name__)
 
 PER_CHAT_PER_MINUTE = 20
 WINDOW_S = 60.0
 # Telegram's global bot limit is ~30 messages/second across ALL chats (PRD §6).
 GLOBAL_PER_SECOND = 30
 GLOBAL_WINDOW_S = 1.0
+# Bounded retry (Stage 11): a message that fails to send is re-queued at the
+# back of its chat's queue and dropped for good after this many attempts, so a
+# poisoned message can never block a chat forever.
+MAX_SEND_ATTEMPTS = 3
 
 TRADE_CARD_TEXT = "{who} {action} {size}on:\n{question}\nEntry: {price}"
 SELL_CARD_TEXT = "{who} sold {size}of:\n{question}\nExit: {price}"
@@ -38,6 +47,7 @@ class PendingMessage:
     reply_markup: Any = None
     reply_to_message_id: int | None = None
     on_sent: Callable[[Any], None] | None = None  # called with the sent Message
+    attempts: int = 0  # failed send attempts so far (see MAX_SEND_ATTEMPTS)
 
 
 @dataclass
@@ -49,6 +59,10 @@ class BroadcastQueue:
 
     send: Callable[..., Any]  # async callable(chat_id=, text=, ...)
     now: Callable[[], float] = time.monotonic
+    # Called with the chat_id when a send fails with Forbidden (bot kicked):
+    # app wiring points this at clan deactivation. The chat's queue is dropped.
+    on_forbidden: Callable[[int], Awaitable[None]] | None = None
+    reporter: ErrorReporter | None = None
     _queues: dict[int, deque[PendingMessage]] = field(default_factory=dict)
     _sent_at: dict[int, deque[float]] = field(default_factory=dict)
     _sent_global: deque[float] = field(default_factory=deque)
@@ -77,26 +91,63 @@ class BroadcastQueue:
         return GLOBAL_PER_SECOND - len(self._sent_global)
 
     async def drain_once(self) -> int:
-        """Send what the per-chat AND global rate budgets allow. Returns sent count."""
+        """Send what the per-chat AND global rate budgets allow. Returns sent count.
+
+        Failure isolation (Stage 11): a raising send is logged + reported and
+        the drain continues; the message is re-queued at the back of its chat's
+        queue and dropped after MAX_SEND_ATTEMPTS. Forbidden (bot kicked) drops
+        the whole chat's queue and triggers on_forbidden cleanup. Attempts count
+        against the rate budgets — a failed API call is still an API call.
+        """
         delivered = 0
         for chat_id, queue in list(self._queues.items()):
             budget = self._budget(chat_id)
             while queue and budget > 0 and self._global_budget() > 0:
                 message = queue.popleft()
-                sent = await self.send(
-                    chat_id=message.chat_id,
-                    text=message.text,
-                    reply_markup=message.reply_markup,
-                    reply_to_message_id=message.reply_to_message_id,
-                )
-                if message.on_sent is not None:
-                    result = message.on_sent(sent)
-                    if inspect.isawaitable(result):
-                        await result
                 stamp = self.now()
                 self._sent_at[chat_id].append(stamp)
                 self._sent_global.append(stamp)
                 budget -= 1
+                try:
+                    sent = await self.send(
+                        chat_id=message.chat_id,
+                        text=message.text,
+                        reply_markup=message.reply_markup,
+                        reply_to_message_id=message.reply_to_message_id,
+                    )
+                except Forbidden as error:
+                    logger.warning("bot removed from chat %s; dropping its queue", chat_id)
+                    await report_safely(self.reporter, error)
+                    queue.clear()
+                    if self.on_forbidden is not None:
+                        try:
+                            await self.on_forbidden(chat_id)
+                        except Exception as cleanup_error:
+                            logger.exception("forbidden-cleanup failed for chat %s", chat_id)
+                            await report_safely(self.reporter, cleanup_error)
+                    break
+                except Exception as error:
+                    message.attempts += 1
+                    logger.exception(
+                        "broadcast send failed for chat %s (attempt %d/%d)",
+                        chat_id,
+                        message.attempts,
+                        MAX_SEND_ATTEMPTS,
+                    )
+                    await report_safely(self.reporter, error)
+                    if message.attempts < MAX_SEND_ATTEMPTS:
+                        queue.append(message)  # retry behind the rest of the chat
+                    else:
+                        logger.error(
+                            "dropping broadcast to chat %s after %d failed attempts",
+                            chat_id,
+                            MAX_SEND_ATTEMPTS,
+                        )
+                    continue
+                if message.on_sent is not None:
+                    result = message.on_sent(sent)
+                    if inspect.isawaitable(result):
+                        await result
                 delivered += 1
             if not queue:
                 self._queues.pop(chat_id, None)

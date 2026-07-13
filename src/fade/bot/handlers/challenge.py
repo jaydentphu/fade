@@ -21,6 +21,7 @@ Idempotency model:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -40,8 +41,11 @@ from fade.bot.handlers.clan import (
 )
 from fade.bot.handlers.common import sanitize
 from fade.bot.handlers.trade import MARKET_CLOSED_TEXT, user_onboarded
-from fade.db.models import Challenge, Resolution
+from fade.db.models import Challenge, Clan, Resolution
+from fade.errors import ErrorReporter, report_safely
 from fade.trading.markets import MarketLookupError
+
+logger = logging.getLogger(__name__)
 
 CHALLENGE_TTL = timedelta(hours=24)
 CHALLENGE_SIZES = ("10", "25", "50")
@@ -404,7 +408,35 @@ async def decline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # -- settlement + expiry (driven by the Stage 6 resolution job) -------------------
 
 
-async def settle_and_expire(session_factory, bot: Any, now: datetime | None = None) -> int:
+async def _chat_deactivated(session_factory, chat_id: int) -> bool:
+    """True when the chat is a clan the bot was removed from (Clan.active=False).
+    Non-clan group chats have no Clan row and are never considered deactivated."""
+    async with session_factory() as session:
+        clan = await session.get(Clan, chat_id)
+    return clan is not None and not clan.active
+
+
+async def _send_to_group(session_factory, bot: Any, reporter, chat_id: int, text: str) -> bool:
+    """Group send with Stage 11 isolation: skips deactivated clan chats, and a
+    raising send is logged + reported without aborting the caller's loop."""
+    if await _chat_deactivated(session_factory, chat_id):
+        logger.info("skipping challenge message to deactivated clan %s", chat_id)
+        return False
+    try:
+        await bot.send_message(chat_id=chat_id, text=text)
+        return True
+    except Exception as error:
+        logger.exception("challenge message failed for chat %s", chat_id)
+        await report_safely(reporter, error)
+        return False
+
+
+async def settle_and_expire(
+    session_factory,
+    bot: Any,
+    now: datetime | None = None,
+    reporter: ErrorReporter | None = None,
+) -> int:
     """Settle accepted challenges whose market resolved; expire stale proposals.
 
     Called from resolutions.scan_job after each resolution scan. A challenge's
@@ -422,9 +454,12 @@ async def settle_and_expire(session_factory, bot: Any, now: datetime | None = No
     for row in pending:
         if _born_utc(row.created_at) < cutoff:
             if await _transition(session_factory, row.id, "pending", status="expired"):
-                await bot.send_message(
-                    chat_id=row.chat_id,
-                    text=CHALLENGE_EXPIRED_TEXT.format(
+                await _send_to_group(
+                    session_factory,
+                    bot,
+                    reporter,
+                    row.chat_id,
+                    CHALLENGE_EXPIRED_TEXT.format(
                         challenger=sanitize(row.challenger_username, limit=40),
                         opponent=sanitize(row.opponent_username, limit=40),
                         question=sanitize(row.market_title),
@@ -464,15 +499,18 @@ async def settle_and_expire(session_factory, bot: Any, now: datetime | None = No
             continue  # another pass already settled it
         challenger = sanitize(row.challenger_username, limit=40)
         opponent = "@" + sanitize(row.opponent_username, limit=40)
-        await bot.send_message(
-            chat_id=row.chat_id,
-            text=SETTLED_TEXT.format(
+        if await _send_to_group(
+            session_factory,
+            bot,
+            reporter,
+            row.chat_id,
+            SETTLED_TEXT.format(
                 question=sanitize(row.market_title),
                 outcome=outcome,
                 winner=challenger if challenger_won else opponent,
                 loser=opponent if challenger_won else challenger,
                 size=row.size_usdc.quantize(Decimal("1")),
             ),
-        )
-        posted += 1
+        ):
+            posted += 1
     return posted

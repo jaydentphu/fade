@@ -46,7 +46,8 @@ async def compute_league(session_factory, now: datetime) -> list[ClanStanding]:
     leaderboard's realization math wholesale."""
     since = week_start(now)
     async with session_factory() as session:
-        clans = (await session.scalars(select(Clan))).all()
+        # Deactivated clans (bot removed from the chat) are out of the league.
+        clans = (await session.scalars(select(Clan).where(Clan.active))).all()
 
     standings: list[ClanStanding] = []
     for clan in clans:

@@ -238,7 +238,9 @@ async def broadcast_fill(
     async with sessions() as session:
         chat_ids = list(
             await session.scalars(
-                select(ClanMember.chat_id).where(ClanMember.telegram_user_id == telegram_user_id)
+                select(ClanMember.chat_id)
+                .join(Clan, Clan.chat_id == ClanMember.chat_id)
+                .where(ClanMember.telegram_user_id == telegram_user_id, Clan.active)
             )
         )
     if not chat_ids:
