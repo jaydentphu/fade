@@ -54,7 +54,10 @@ class OrderResult:
     fill_price: Decimal | None = None
     fill_shares: Decimal | None = None
     fill_usdc: Decimal | None = None
-    fee: Decimal | None = None
+    fee: Decimal | None = None  # builder fee
+    # Polymarket's platform fee, estimated from the market's fee params
+    # (F-13/D-10); None = could not estimate (renders as unavailable, not $0).
+    platform_fee: Decimal | None = None
     new_balance: Decimal | None = None
     error: str = ""
 
@@ -323,6 +326,7 @@ class TradingService:
                 usdc, shares = response.taking_amount, response.making_amount
             price = (usdc / shares).quantize(Decimal("0.0001")) if shares else Decimal(0)
             fee = await self._builder_fee(client, usdc)
+            platform_fee = await self._platform_fee(client, token_id, price, shares)
             balance = await client.get_balance_allowance(asset_type="COLLATERAL")
 
         return OrderResult(
@@ -332,6 +336,7 @@ class TradingService:
             fill_shares=shares,
             fill_usdc=usdc,
             fee=fee,
+            platform_fee=platform_fee,
             new_balance=Decimal(balance.balance) / PUSD_DECIMALS,
         )
 
@@ -341,6 +346,48 @@ class TradingService:
             return (fill_usdc * Decimal(rates.taker)).quantize(CENT)
         except Exception:
             return Decimal("0")
+
+    async def _platform_fee(
+        self, client, token_id: str, price: Decimal, shares: Decimal
+    ) -> Decimal | None:
+        """Estimated Polymarket platform fee for a fill (PRD F-13, D-10).
+
+        The fill response carries no fee figures, so this is computed from the
+        market's fee params — rate × (p(1-p))^exponent per share, the exact
+        formula the SDK uses to size orders (docs/SPIKE-NOTES.md §4). None
+        means "couldn't estimate": the confirmation renders that honestly
+        instead of showing a false $0.
+        """
+        if price <= 0 or shares is None:
+            return None
+        try:
+            info = await self._platform_fee_info(client, token_id)
+            if info is None:
+                return None
+            effective = info.rate * ((price * (Decimal(1) - price)) ** info.exponent)
+            return (shares * effective).quantize(CENT)
+        except Exception:
+            logger.warning("platform fee estimate failed for token %s", token_id, exc_info=True)
+            return None
+
+    async def _platform_fee_info(self, client, token_id: str):
+        getter = getattr(client, "get_platform_fee_info", None)
+        if getter is not None:
+            return await getter(token_id=token_id)
+        # The beta SDK computes platform fees internally but has no public
+        # accessor yet; reach its documented endpoint through the internal
+        # actions, degrading to None ("estimate unavailable") if that seam
+        # moves in a future SDK release.
+        ctx = getattr(client, "_ctx", None)
+        if ctx is None:
+            return None
+        from polymarket._internal.actions.orders.market_data import (
+            fetch_platform_fee_info,
+            resolve_condition_by_token,
+        )
+
+        condition_id = await resolve_condition_by_token(ctx, token_id=token_id)
+        return await fetch_platform_fee_info(ctx, condition_id=condition_id)
 
     async def _slippage_bps(self, telegram_user_id: int) -> int:
         async with self._sessions() as session:

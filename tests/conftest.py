@@ -62,6 +62,13 @@ class SharedFakeClobClient:
 
         return SimpleNamespace(taker=Decimal("0.01"), maker=Decimal("0"))
 
+    async def get_platform_fee_info(self, *, token_id: str):
+        from decimal import Decimal
+        from types import SimpleNamespace
+
+        # Platform fee params (F-13): rate × (p(1-p))^exponent per share.
+        return SimpleNamespace(rate=Decimal("0.02"), exponent=Decimal("1"))
+
     async def get_balance_allowance(self, *, asset_type: str):
         from types import SimpleNamespace
 

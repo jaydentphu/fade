@@ -111,7 +111,7 @@ async def setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_group(update):
         await update.message.reply_text(GROUP_ONLY_TEXT)
         return
-    if not await user_onboarded(context, update.effective_user.id):
+    if not await user_onboarded(context, update.effective_user.id, update.effective_user):
         await update.message.reply_text(JOIN_NEED_ACCOUNT_TEXT)
         return
 
@@ -142,7 +142,7 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_group(update):
         await update.message.reply_text(GROUP_ONLY_TEXT)
         return
-    if not await user_onboarded(context, update.effective_user.id):
+    if not await user_onboarded(context, update.effective_user.id, update.effective_user):
         await update.message.reply_text(JOIN_NEED_ACCOUNT_TEXT)
         return
 
@@ -297,7 +297,7 @@ async def fade_copy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if card is None:
         await query.answer(CARD_EXPIRED_ALERT, show_alert=True)
         return
-    if not await user_onboarded(context, update.effective_user.id):
+    if not await user_onboarded(context, update.effective_user.id, update.effective_user):
         await query.answer(NEED_ACCOUNT_ALERT, show_alert=True)
         return
     await query.answer()

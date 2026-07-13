@@ -1,9 +1,13 @@
-"""/wallet: address, balance, deposit instructions. DM-only per PRD F-7.
+"""/wallet: address, balance, open-position value, deposit instructions.
+DM-only per PRD F-7.
 
 Money screen: plain and precise. Group chats never see addresses or balances.
 """
 
 from __future__ import annotations
+
+import logging
+from decimal import Decimal
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -15,18 +19,43 @@ from fade.bot.handlers.common import (
     format_deposit_lines,
 )
 
+logger = logging.getLogger(__name__)
+
 NOT_ONBOARDED_TEXT = "No wallet yet. Run /start first."
 
 FETCHING_TEXT = "Fetching your balance..."
 
+POSITIONS_VALUE_LINE = "Open positions: ${value}"
+POSITIONS_VALUE_UNAVAILABLE = "Open positions: value unavailable right now."
+
 WALLET_TEXT = (
     "Wallet: `{address}`\n"
-    "Balance: ${balance} (pUSD)\n\n"
+    "Balance: ${balance} (pUSD)\n"
+    "{positions_line}\n\n"
     "To deposit, send USDC to your personal deposit address:\n"
     "{deposit_lines}\n\n"
     "Funds arrive as pUSD after bridge processing. "
     "You'll get a message here when a deposit is confirmed."
 )
+
+
+async def _positions_line(context: ContextTypes.DEFAULT_TYPE, address: str) -> str:
+    """Total current value of open positions (PRD F-2), reusing the existing
+    TradingService.list_positions path. A fetch failure degrades to a plain
+    'unavailable' line — the balance must always still render."""
+    trading = context.application.bot_data.get("trading")
+    if trading is None:
+        return POSITIONS_VALUE_UNAVAILABLE
+    try:
+        views = await trading.list_positions(address)
+    except Exception:
+        logger.warning("positions fetch failed for /wallet", exc_info=True)
+        return POSITIONS_VALUE_UNAVAILABLE
+    total = sum(
+        (view.shares * view.cur_price for view in views if view.cur_price is not None),
+        Decimal(0),
+    )
+    return POSITIONS_VALUE_LINE.format(value=f"{total:.2f}")
 
 
 async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -48,10 +77,12 @@ async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     progress = await update.message.reply_text(FETCHING_TEXT)
     balance = await wallets.get_balance(update.effective_user.id)
     deposit_addresses = await wallets.get_deposit_addresses(update.effective_user.id)
+    positions_line = await _positions_line(context, address)
     await progress.edit_text(
         WALLET_TEXT.format(
             address=address,
             balance=format_balance(balance),
+            positions_line=positions_line,
             deposit_lines=format_deposit_lines(deposit_addresses),
         ),
         parse_mode="Markdown",

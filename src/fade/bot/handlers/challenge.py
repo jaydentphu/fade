@@ -129,7 +129,7 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_group(update):
         await update.message.reply_text(GROUP_ONLY_TEXT)
         return
-    if not await user_onboarded(context, update.effective_user.id):
+    if not await user_onboarded(context, update.effective_user.id, update.effective_user):
         await update.message.reply_text(NEED_ACCOUNT_ALERT)
         return
 
@@ -283,7 +283,7 @@ async def _answer_guard(
     if (tapper.username or "").lower() != row.opponent_username:
         await query.answer(NOT_YOUR_CHALLENGE_ALERT, show_alert=True)
         return None
-    if not await user_onboarded(context, tapper.id):
+    if not await user_onboarded(context, tapper.id, tapper):
         await query.answer(NEED_ACCOUNT_ALERT, show_alert=True)
         return None
     if row.status != "pending":

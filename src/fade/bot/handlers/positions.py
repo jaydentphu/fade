@@ -52,7 +52,7 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             reply_markup=dm_button(context.bot.username, "positions"),
         )
         return
-    if not await user_onboarded(context, update.effective_user.id):
+    if not await user_onboarded(context, update.effective_user.id, update.effective_user):
         await update.message.reply_text(NOT_ONBOARDED_TEXT)
         return
 

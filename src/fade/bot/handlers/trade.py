@@ -44,8 +44,12 @@ FILLED_TEXT = (
     "Shares: {shares}\n"
     "Avg price: {price}\n"
     "Fee (builder): ${fee}\n"
+    "Fee (Polymarket, estimated): {platform_fee}\n"
     "New balance: ${balance}"
 )
+# The fill response carries no platform-fee figure; the estimate comes from the
+# market's fee params (F-13). When even that isn't available, say so plainly.
+PLATFORM_FEE_UNAVAILABLE = "estimate unavailable"
 
 REJECTED_TEXT = "Order not filled: {reason}. Nothing was spent."
 FAILED_TEXT = "Order failed: {reason}. Nothing was spent."
@@ -59,10 +63,26 @@ async def get_card(context: ContextTypes.DEFAULT_TYPE, key: str) -> MarketCard |
     return await get_store(context).get("market", key)
 
 
-async def user_onboarded(context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int) -> bool:
+async def user_onboarded(
+    context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int, tg_user=None
+) -> bool:
+    """Onboarding gate; also keeps usernames fresh. Handlers that have the
+    Telegram user object pass it, and a rename is picked up inside the SELECT
+    this check already does — no extra queries per message. Leaderboards and
+    /record then show the current name after the user's next interaction."""
     sessions = context.application.bot_data["sessions"]
     async with sessions() as session:
         user = await session.scalar(select(User).where(User.telegram_user_id == telegram_user_id))
+        current = getattr(tg_user, "username", None)
+        if (
+            user is not None
+            and user.onboarded
+            and isinstance(current, str)
+            and current
+            and current != user.username
+        ):
+            user.username = current
+            await session.commit()
     return bool(user and user.onboarded)
 
 
@@ -99,7 +119,7 @@ async def show_market_card(update: Update, context: ContextTypes.DEFAULT_TYPE, u
     """Fetch a market by URL and post the trade card."""
     if update.message is None or update.effective_user is None:
         return
-    if not await user_onboarded(context, update.effective_user.id):
+    if not await user_onboarded(context, update.effective_user.id, update.effective_user):
         await update.message.reply_text(NOT_ONBOARDED_TEXT)
         return
 
@@ -192,7 +212,7 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if query is None or query.data is None or update.effective_user is None:
         return
     await query.answer()
-    if not await user_onboarded(context, update.effective_user.id):
+    if not await user_onboarded(context, update.effective_user.id, update.effective_user):
         await query.edit_message_text(NOT_ONBOARDED_TEXT)
         return
     _, key, side_letter, amount_raw = query.data.split(":")
@@ -234,6 +254,11 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def render_result(query, result, action: str, question: str) -> None:
     if result.status == "filled":
+        platform_fee = (
+            f"${result.platform_fee}"
+            if getattr(result, "platform_fee", None) is not None
+            else PLATFORM_FEE_UNAVAILABLE
+        )
         await query.edit_message_text(
             FILLED_TEXT.format(
                 action=action,
@@ -241,6 +266,7 @@ async def render_result(query, result, action: str, question: str) -> None:
                 shares=result.fill_shares,
                 price=result.fill_price,
                 fee=result.fee,
+                platform_fee=platform_fee,
                 balance=result.new_balance,
             )
         )

@@ -68,6 +68,18 @@ async def _log_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None
             await maybe
 
 
+async def _post_init(application: Application) -> None:
+    """Register the public command menu with Telegram so "/" autocompletes.
+    Built from the same registry as /help and onboarding — one source of truth."""
+    from telegram import BotCommand
+
+    from fade.bot.handlers.basic import COMMANDS
+
+    await application.bot.set_my_commands(
+        [BotCommand(name, description) for name, description in COMMANDS]
+    )
+
+
 async def _broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.application.bot_data["broadcasts"].drain_once()
 
@@ -100,7 +112,7 @@ async def _league_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def build_application(settings: Settings) -> Application:
-    app = Application.builder().token(settings.telegram_bot_token).build()
+    app = Application.builder().token(settings.telegram_bot_token).post_init(_post_init).build()
 
     engine = make_engine(settings.database_url)
     sessions = make_session_factory(engine)
@@ -166,6 +178,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("resume", admin.resume))
     app.add_handler(CommandHandler("stats", admin.stats))
     app.add_handler(CommandHandler("ping", basic.ping))
+    app.add_handler(CommandHandler("help", basic.help_command))
 
     # Callback queries
     app.add_handler(

@@ -14,6 +14,7 @@ from sqlalchemy import select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from fade.bot.handlers.basic import COMMANDS_TEXT
 from fade.bot.handlers.common import (
     GROUP_REDIRECT_TEXT,
     dm_button,
@@ -48,20 +49,8 @@ CREATION_FAILED_TEXT = (
 OVERVIEW_HEADER_NEW = "⚔️ Welcome to Fade."
 OVERVIEW_HEADER_BACK = "⚔️ Welcome back to Fade."
 
-COMMANDS_TEXT = (
-    "Commands:\n"
-    "• Paste a Polymarket link — get a market card, tap to trade\n"
-    "• /positions — your open positions, one-tap sell\n"
-    "• /withdraw — cash out to any address\n"
-    "• /wallet — balance + deposit info\n"
-    "• /trending — what's hot right now\n"
-    "• /search <term> — find a specific market\n"
-    "• /export — export your private key (only if you know why you'd need to)\n"
-    "• /ping — check I'm alive\n\n"
-    "In a group: /setup registers the clan, /join enlists you, /leaderboard "
-    "settles arguments. Every member's trade posts with ⚔️ Fade and 📋 Copy "
-    "buttons. /privacy hides your sizes."
-)
+# The command list is the shared registry in basic.py (single source of
+# truth with /help and the Telegram command menu — they can never drift).
 
 OVERVIEW_TEXT = (
     "{header}\n\n"
@@ -85,6 +74,32 @@ async def _render_overview(wallets, telegram_user_id: int, address: str, header:
     )
 
 
+async def _route_deep_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Route a /start payload into the flow the user tapped for. True if routed."""
+    payload = (context.args[0] if context.args else "").lower()
+    if payload == "withdraw":
+        from fade.bot.handlers.withdraw import withdraw
+
+        await withdraw(update, context)
+        return True
+    if payload == "positions":
+        from fade.bot.handlers.positions import positions
+
+        await positions(update, context)
+        return True
+    if payload == "wallet":
+        from fade.bot.handlers.wallet import wallet
+
+        await wallet(update, context)
+        return True
+    if payload == "export":
+        from fade.bot.handlers.export import export
+
+        await export(update, context)
+        return True
+    return False
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None or update.effective_user is None:
         return
@@ -105,6 +120,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Attested, but wallet creation may have failed midway: offer to resume.
         address = await wallets.get_wallet_address(update.effective_user.id)
         if address is not None:
+            # Deep-link payload routing: the group-redirect buttons send the
+            # user here with the flow they actually asked for. Unknown or
+            # missing payloads fall back to the overview. Non-onboarded users
+            # never reach this branch — the attestation gate always wins.
+            if await _route_deep_link(update, context):
+                return
             text = await _render_overview(
                 wallets, update.effective_user.id, address, OVERVIEW_HEADER_BACK
             )
