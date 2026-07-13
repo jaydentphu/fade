@@ -204,6 +204,9 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CallbackQueryHandler(challenge.accept_callback, pattern="^ha:"))
     app.add_handler(CallbackQueryHandler(challenge.decline_callback, pattern="^hd:"))
     app.add_handler(CallbackQueryHandler(challenge.cancel_callback, pattern="^hx:"))
+    app.add_handler(CallbackQueryHandler(challenge.withdraw_callback, pattern="^hc:"))
+    # Category browsing (F-9)
+    app.add_handler(CallbackQueryHandler(discover.category_callback, pattern="^c:"))
 
     # Free text in DMs: pasted URLs and flow replies
     app.add_handler(

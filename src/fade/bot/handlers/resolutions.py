@@ -159,29 +159,43 @@ class ResolutionScanner:
             await report_safely(self._reporter, error, user_id=telegram_user_id)
 
 
-async def fetch_resolved_positions(address: str) -> list[ResolvedPosition]:
-    """Production fetcher: redeemable positions from the Polymarket data API."""
-    from polymarket import AsyncPublicClient
+# Same bound rationale as TradingService.MAX_POSITION_PAGES: fixes silent
+# first-page truncation for heavy traders while capping how long one wallet
+# can occupy the 5-minute scanner (10 pages ≈ 1000 positions).
+MAX_RESOLUTION_PAGES = 10
+
+
+async def fetch_resolved_positions(address: str, client_factory=None) -> list[ResolvedPosition]:
+    """Production fetcher: redeemable positions from the Polymarket data API,
+    across ALL pages (bounded). `client_factory` is injectable for tests."""
+    if client_factory is None:
+        from polymarket import AsyncPublicClient
+
+        client_factory = AsyncPublicClient
 
     resolved: list[ResolvedPosition] = []
-    async with AsyncPublicClient() as client:
-        page = await client.list_positions(user=address).first_page()
-    for pos in page.items:
-        if not getattr(pos, "redeemable", False):
-            continue
-        if pos.token_id is None or not pos.size or pos.avg_price is None:
-            continue
-        final = Decimal("1") if (pos.cur_price or 0) >= Decimal("0.5") else Decimal("0")
-        resolved.append(
-            ResolvedPosition(
-                token_id=str(pos.token_id),
-                title=pos.title or "(unknown market)",
-                shares=pos.size,
-                avg_price=pos.avg_price,
-                final_price=final,
-                outcome=pos.outcome or "",
-            )
-        )
+    async with client_factory() as client:
+        pages = 0
+        async for page in client.list_positions(user=address):
+            for pos in page.items:
+                if not getattr(pos, "redeemable", False):
+                    continue
+                if pos.token_id is None or not pos.size or pos.avg_price is None:
+                    continue
+                final = Decimal("1") if (pos.cur_price or 0) >= Decimal("0.5") else Decimal("0")
+                resolved.append(
+                    ResolvedPosition(
+                        token_id=str(pos.token_id),
+                        title=pos.title or "(unknown market)",
+                        shares=pos.size,
+                        avg_price=pos.avg_price,
+                        final_price=final,
+                        outcome=pos.outcome or "",
+                    )
+                )
+            pages += 1
+            if pages >= MAX_RESOLUTION_PAGES:
+                break
     return resolved
 
 

@@ -29,6 +29,12 @@ from fade.wallets import PUSD_DECIMALS, WalletService
 
 CENT = Decimal("0.01")
 
+# Pagination bound (Stage 14): the data API pages positions; iterating ALL
+# pages fixes silent truncation for heavy traders, and the bound stops a
+# pathological account (or an API cursor loop) from spinning a scan forever.
+# 10 pages ≈ 1000 positions — far beyond any real wallet here.
+MAX_POSITION_PAGES = 10
+
 logger = logging.getLogger(__name__)
 
 VOLUME_CAP_TEXT = (
@@ -85,6 +91,7 @@ class TradingService:
         wallets: WalletService,
         now: Callable[[], datetime] | None = None,
         alert: Callable[[str], Awaitable[None]] | None = None,
+        public_client_factory: Callable[[], AsyncPublicClient] | None = None,
     ) -> None:
         self._settings = settings
         self._sessions = session_factory
@@ -92,6 +99,8 @@ class TradingService:
         self._now = now or (lambda: datetime.now(UTC))
         self._alert = alert  # async sink for admin anomaly alerts (optional)
         self._alerted_users: set[int] = set()  # currently-flagged incidents
+        # Injectable so pagination is testable without a live network.
+        self._public = public_client_factory or AsyncPublicClient
 
     # -- market data ---------------------------------------------------------
 
@@ -117,6 +126,26 @@ class TradingService:
             except MarketLookupError:
                 continue
             if card.open:
+                cards.append(card)
+            if len(cards) >= limit:
+                break
+        return cards
+
+    async def list_by_category(self, category: str, limit: int = 5) -> list[MarketCard]:
+        """Top open markets in one Polymarket category (F-9 category browsing).
+        Same volume-ordered fetch as list_trending, filtered by category —
+        no parallel data path."""
+        cards: list[MarketCard] = []
+        async with AsyncPublicClient() as client:
+            page = await client.list_markets(
+                closed=False, order="volumeNum", ascending=False
+            ).first_page()
+        for market in page.items:
+            try:
+                card = market_to_card(market)
+            except MarketLookupError:
+                continue
+            if card.open and (card.category or "").lower() == category.lower():
                 cards.append(card)
             if len(cards) >= limit:
                 break
@@ -410,22 +439,26 @@ class TradingService:
     # -- positions -----------------------------------------------------------
 
     async def list_positions(self, wallet_address: str) -> list[PositionView]:
-        async with AsyncPublicClient() as client:
-            page = await client.list_positions(user=wallet_address).first_page()
-        views = []
-        for pos in page.items:
-            if pos.token_id is None or not pos.size:
-                continue
-            views.append(
-                PositionView(
-                    token_id=str(pos.token_id),
-                    title=pos.title or "(unknown market)",
-                    outcome=pos.outcome or "?",
-                    shares=pos.size,
-                    avg_price=pos.avg_price,
-                    cur_price=pos.cur_price,
-                    cash_pnl=pos.cash_pnl,
-                    percent_pnl=pos.percent_pnl,
-                )
-            )
+        views: list[PositionView] = []
+        async with self._public() as client:
+            pages = 0
+            async for page in client.list_positions(user=wallet_address):
+                for pos in page.items:
+                    if pos.token_id is None or not pos.size:
+                        continue
+                    views.append(
+                        PositionView(
+                            token_id=str(pos.token_id),
+                            title=pos.title or "(unknown market)",
+                            outcome=pos.outcome or "?",
+                            shares=pos.size,
+                            avg_price=pos.avg_price,
+                            cur_price=pos.cur_price,
+                            cash_pnl=pos.cash_pnl,
+                            percent_pnl=pos.percent_pnl,
+                        )
+                    )
+                pages += 1
+                if pages >= MAX_POSITION_PAGES:
+                    break
         return views

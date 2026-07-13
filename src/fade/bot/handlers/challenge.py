@@ -17,6 +17,15 @@ Idempotency model:
 - Settlement rides the Stage 6 resolution scanner: `settle_and_expire` (called
   from resolutions.scan_job) matches Resolution rows against accepted
   challenges' token pairs and announces the winner in the group exactly once.
+
+Opponent identity (Stage 14): a text_mention entity (user without a username)
+carries the real user id, captured at propose time — those challenges are
+owner-locked by id. Plain @username challenges stay locked by username, which
+means a pending challenge whose opponent RENAMES their username can no longer
+be accepted by them; that's accepted behavior, not a bug: the challenger can
+cancel it from the card (pending -> cancelled), and the 24h TTL expires it
+regardless, so no challenge is ever stuck and no funds are ever locked up
+(nothing moves before acceptance).
 """
 
 from __future__ import annotations
@@ -54,7 +63,11 @@ USAGE_TEXT = "Usage: /challenge @user <polymarket url>. Pick your fight properly
 SELF_CHALLENGE_TEXT = "You can't challenge yourself. Therapy is cheaper."
 CARD_EXPIRED_ALERT = "That challenge card expired. Run /challenge again."
 NOT_YOUR_CHALLENGE_ALERT = "This challenge isn't yours to answer."
+NOT_YOUR_WITHDRAW_ALERT = "Only the challenger can withdraw this."
 ALREADY_HANDLED_ALERT = "Too late — this challenge was already answered or expired."
+WITHDRAWN_TEXT = (
+    "🏳️ {challenger} withdrew the challenge against @{opponent}. No money moved."
+)
 CHALLENGE_EXPIRED_TEXT = (
     "⏳ Challenge expired unanswered: {challenger} vs @{opponent} on\n"
     "{question}\nNo money moved. Cowardice is also a position."
@@ -97,10 +110,13 @@ class ChallengeCard:
     chat_id: int
     challenger_id: int
     challenger_username: str
-    opponent_username: str  # lowercase, no @
+    opponent_username: str  # lowercase, no @ (display name for id-based)
     question: str
     yes_token: str
     no_token: str
+    # Real user id when the opponent came from a text_mention (no username);
+    # None for @username challenges. Default keeps cached cards revivable.
+    opponent_id: int | None = None
 
 
 def _born_utc(value: datetime) -> datetime:
@@ -139,11 +155,22 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             opponent = arg[1:]
         elif arg.startswith("http"):
             url = arg
+    # A user without a username arrives as a text_mention entity carrying
+    # their real id — sturdier than a username, so it wins when present.
+    opponent_id: int | None = None
+    entities = update.message.entities
+    for entity in entities if isinstance(entities, (list, tuple)) else ():
+        if getattr(entity, "type", "") == "text_mention" and entity.user is not None:
+            opponent_id = entity.user.id
+            opponent = entity.user.first_name or str(entity.user.id)
+            break
     if opponent is None or url is None:
         await update.message.reply_text(USAGE_TEXT)
         return
     me = update.effective_user
-    if opponent.lower() == (me.username or "").lower():
+    if opponent_id == me.id or (
+        opponent_id is None and opponent.lower() == (me.username or "").lower()
+    ):
         await update.message.reply_text(SELF_CHALLENGE_TEXT)
         return
 
@@ -161,10 +188,13 @@ async def challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id=update.effective_chat.id,
         challenger_id=me.id,
         challenger_username=me.username or me.first_name,
-        opponent_username=opponent.lower(),
+        # Usernames are lowercased for the accept-lock match; a text_mention
+        # opponent's display name is kept as-is (their lock is the id).
+        opponent_username=opponent if opponent_id is not None else opponent.lower(),
         question=market.question,
         yes_token=market.yes_token,
         no_token=market.no_token,
+        opponent_id=opponent_id,
     )
     key = await get_store(context).put("challenge", card)
     rows = [
@@ -214,6 +244,7 @@ async def pick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         challenger_id=card.challenger_id,
         challenger_username=card.challenger_username,
         opponent_username=card.opponent_username,
+        opponent_id=card.opponent_id,  # pre-set only for text_mention opponents
         market_title=card.question[:200],
         yes_token=card.yes_token,
         no_token=card.no_token,
@@ -233,7 +264,8 @@ async def pick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             [
                 InlineKeyboardButton("🤝 Accept", callback_data=f"ha:{challenge_id}"),
                 InlineKeyboardButton("🏳️ Decline", callback_data=f"hd:{challenge_id}"),
-            ]
+            ],
+            [InlineKeyboardButton("Withdraw challenge", callback_data=f"hc:{challenge_id}")],
         ]
     )
     await query.edit_message_text(
@@ -280,7 +312,13 @@ async def _answer_guard(
         await query.answer(ALREADY_HANDLED_ALERT, show_alert=True)
         return None
     tapper = update.effective_user
-    if (tapper.username or "").lower() != row.opponent_username:
+    # Owner lock: text_mention challenges carry the opponent's real id (set at
+    # propose time) and lock on it; @username challenges lock on the username.
+    if row.opponent_id is not None:
+        if tapper.id != row.opponent_id:
+            await query.answer(NOT_YOUR_CHALLENGE_ALERT, show_alert=True)
+            return None
+    elif (tapper.username or "").lower() != row.opponent_username:
         await query.answer(NOT_YOUR_CHALLENGE_ALERT, show_alert=True)
         return None
     if not await user_onboarded(context, tapper.id, tapper):
@@ -399,6 +437,34 @@ async def decline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
     await query.edit_message_text(
         DECLINED_TEXT.format(
+            challenger=sanitize(row.challenger_username, limit=40),
+            opponent=sanitize(row.opponent_username, limit=40),
+        )
+    )
+
+
+async def withdraw_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Challenger withdraws their own pending challenge: atomic
+    pending -> cancelled, no funds moved. The lock is inverted vs. accept:
+    ONLY the challenger may withdraw (the opponent has Decline)."""
+    query = update.callback_query
+    if query is None or query.data is None or update.effective_user is None:
+        return
+    challenge_id = int(query.data.split(":")[1])
+    sessions = context.application.bot_data["sessions"]
+    row = await _load_challenge(sessions, challenge_id)
+    if row is None:
+        await query.answer(ALREADY_HANDLED_ALERT, show_alert=True)
+        return
+    if update.effective_user.id != row.challenger_id:
+        await query.answer(NOT_YOUR_WITHDRAW_ALERT, show_alert=True)
+        return
+    if not await _transition(sessions, challenge_id, "pending", status="cancelled"):
+        await query.answer(ALREADY_HANDLED_ALERT, show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(
+        WITHDRAWN_TEXT.format(
             challenger=sanitize(row.challenger_username, limit=40),
             opponent=sanitize(row.opponent_username, limit=40),
         )

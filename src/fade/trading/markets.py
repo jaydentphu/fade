@@ -24,6 +24,9 @@ class MarketCard:
     no_price: Decimal | None
     end_date: str | None
     open: bool
+    # Polymarket's own category label (F-9 "browsable by category"); None when
+    # the market data doesn't carry one. Default keeps cached cards revivable.
+    category: str | None = None
 
 
 def extract_polymarket_url(text: str) -> str | None:
@@ -48,4 +51,5 @@ def market_to_card(market) -> MarketCard:
         no_price=no.price,
         end_date=end,
         open=is_open,
+        category=getattr(market, "category", None),
     )
