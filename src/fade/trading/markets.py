@@ -34,6 +34,18 @@ def extract_polymarket_url(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+def truncate_utf8(text: str, max_bytes: int) -> str:
+    """Truncate to a UTF-8 byte budget without splitting a character.
+
+    Telegram's callback_data limit is 64 BYTES, not characters — a non-ASCII
+    category name sliced by characters can silently exceed it (Stage 16).
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
 def market_to_card(market) -> MarketCard:
     """Convert an SDK Market model to our card, enforcing tradeability."""
     yes, no = market.outcomes.yes, market.outcomes.no

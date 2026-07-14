@@ -18,7 +18,9 @@ from fade.db.models import Deposit, Order, TradingPauseFlag, User, Withdrawal
 ADMIN_ID = 1  # matches the settings fixture
 RANDO_ID = 999
 
-NOW = datetime(2026, 7, 12, 15, 0, tzinfo=UTC)
+# Clock-relative on purpose: /stats uses the REAL clock, so seeding against a
+# hard-coded date rots within a day (it did — Stage 16 fixture correction).
+NOW = datetime.now(UTC)
 RECENT = NOW.replace(tzinfo=None) - timedelta(hours=1)
 OLD = NOW.replace(tzinfo=None) - timedelta(hours=30)
 
@@ -116,7 +118,9 @@ async def test_digest_numbers_computed_correctly_from_a_seeded_day(session_facto
 
 
 async def test_digest_sends_exactly_once_per_day_boundary(session_factory):
-    clock = {"now": NOW}
+    # Anchored at 03:00 so the +3h same-day step can never cross midnight,
+    # whatever wall-clock time the suite runs at.
+    clock = {"now": NOW.replace(hour=3, minute=0, second=0, microsecond=0)}
     sender = DigestSender(session_factory, ADMIN_ID, now=lambda: clock["now"])
     bot = MagicMock()
     bot.send_message = AsyncMock()

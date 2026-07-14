@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 
 from fade.bot.handlers.common import sanitize
 from fade.bot.handlers.trade import cache_card, card_keyboard, get_card, render_card_text
+from fade.trading.markets import truncate_utf8
 
 TRENDING_HEADER = "🔥 Trending on Polymarket — pick your poison:"
 CATEGORY_HEADER = "📂 Top of {category}:"
@@ -25,6 +26,8 @@ FETCHING_TEXT = "Looking..."
 
 MAX_CATEGORY_BUTTONS = 6
 CATEGORY_BUTTONS_PER_ROW = 3
+# Telegram caps callback_data at 64 BYTES; "c:" costs 2, leave headroom.
+CATEGORY_DATA_BYTES = 60
 
 
 async def _results_keyboard(
@@ -38,7 +41,9 @@ async def _results_keyboard(
         rows.append([InlineKeyboardButton(label, callback_data=f"v:{key}")])
     if categories:
         buttons = [
-            InlineKeyboardButton(f"📂 {name}", callback_data=f"c:{name[:40]}")
+            InlineKeyboardButton(
+                f"📂 {name}", callback_data=f"c:{truncate_utf8(name, CATEGORY_DATA_BYTES)}"
+            )
             for name in categories[:MAX_CATEGORY_BUTTONS]
         ]
         rows.extend(

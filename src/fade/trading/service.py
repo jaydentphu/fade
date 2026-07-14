@@ -134,8 +134,10 @@ class TradingService:
     async def list_by_category(self, category: str, limit: int = 5) -> list[MarketCard]:
         """Top open markets in one Polymarket category (F-9 category browsing).
         Same volume-ordered fetch as list_trending, filtered by category —
-        no parallel data path."""
+        no parallel data path. Accepts byte-truncated names too: callback
+        data is capped at 64 UTF-8 bytes, so a long category arrives cut."""
         cards: list[MarketCard] = []
+        wanted = category.lower()
         async with AsyncPublicClient() as client:
             page = await client.list_markets(
                 closed=False, order="volumeNum", ascending=False
@@ -145,7 +147,8 @@ class TradingService:
                 card = market_to_card(market)
             except MarketLookupError:
                 continue
-            if card.open and (card.category or "").lower() == category.lower():
+            label = (card.category or "").lower()
+            if card.open and (label == wanted or (wanted and label.startswith(wanted))):
                 cards.append(card)
             if len(cards) >= limit:
                 break

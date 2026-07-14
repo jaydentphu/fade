@@ -9,7 +9,17 @@ path here that could accept one.
 initData verification follows Telegram's official algorithm: the secret key
 is HMAC-SHA256("WebAppData", bot_token); the received fields (minus `hash`)
 are sorted, joined as `k=v` lines, HMAC'd with that secret, and compared to
-the `hash` field constant-time. Checked before ANY state change.
+the `hash` field constant-time. Checked before ANY state change, and bounded
+by INIT_DATA_MAX_AGE_S so captured initData can't replay forever.
+
+Script pins (Stage 16, SHA-384 subresource integrity, computed 2026-07-13):
+- ethers 6.13.4 (cdn.jsdelivr.net, immutable versioned URL):
+  sha384-6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM
+- telegram-web-app.js (telegram.org — NOTE: Telegram serves this UNVERSIONED
+  and mutable; the pin locks today's content and must be refreshed if
+  Telegram ships an update, which will show up as the page failing closed
+  rather than loading unpinned code. Vendoring is planned in Stage 21):
+  sha384-UIU2aXwkvBIU//NSd8KQvPQc3/EvwMoKj+m2qYgtQAtF1u3Vvhf5+pjstVoLvU3i
 """
 
 from __future__ import annotations
@@ -19,6 +29,8 @@ import hmac
 import json
 import logging
 import re
+import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import parse_qsl
 
@@ -28,9 +40,19 @@ logger = logging.getLogger(__name__)
 
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
+# initData replay window (Stage 16): auth_date is stamped when the Mini App
+# opens; a legitimate registration happens within minutes of that. One hour
+# is generous for slow users while making a captured initData worthless to
+# an attacker after lunch instead of forever. Telegram's own guidance is to
+# bound auth_date's age.
+INIT_DATA_MAX_AGE_S = 3600
 
-def validate_init_data(init_data: str, bot_token: str) -> dict[str, str] | None:
-    """Verify Telegram WebApp initData. Returns its fields, or None if invalid."""
+
+def validate_init_data(
+    init_data: str, bot_token: str, now: Callable[[], float] | None = None
+) -> dict[str, str] | None:
+    """Verify Telegram WebApp initData: signature first, then freshness.
+    Returns its fields, or None if invalid. `now` is injectable for tests."""
     if not init_data or not bot_token:
         return None
     try:
@@ -44,6 +66,14 @@ def validate_init_data(init_data: str, bot_token: str) -> dict[str, str] | None:
     secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     computed = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(computed, received_hash):
+        return None
+    # Freshness: a valid signature on ancient initData is a replay, not a user.
+    try:
+        auth_date = int(fields["auth_date"])
+    except (KeyError, ValueError):
+        return None
+    current = now() if now is not None else time.time()
+    if current - auth_date > INIT_DATA_MAX_AGE_S:
         return None
     return fields
 
@@ -102,8 +132,12 @@ MINIAPP_HTML = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fade — create your wallet</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"
+        integrity="sha384-UIU2aXwkvBIU//NSd8KQvPQc3/EvwMoKj+m2qYgtQAtF1u3Vvhf5+pjstVoLvU3i"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"
+        integrity="sha384-6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM"
+        crossorigin="anonymous"></script>
 <style>
   body { font-family: system-ui, sans-serif; margin: 1.2rem; background: #14100E; color: #F2EFEA; }
   button { font-size: 1rem; padding: .8rem 1.2rem; border-radius: 8px; border: 0;

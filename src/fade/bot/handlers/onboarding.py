@@ -62,20 +62,32 @@ OVERVIEW_HEADER_BACK = "⚔️ Welcome back to Fade."
 
 OVERVIEW_TEXT = (
     "{header}\n\n"
-    "💰 Balance: ${balance} (pUSD)\n\n"
+    "💰 Balance: {balance_display}\n\n"
     "Deposit (send USDC, arrives as pUSD):\n"
     "{deposit_lines}\n\n"
     "Wallet: `{address}`\n\n"
     "{commands}"
 )
 
+# Client-custody wallets (PRD §7.8): no server key = no balance read. Honest
+# line instead of a crash; /security carries the full explanation.
+CLIENT_BALANCE_DISPLAY = (
+    "check your wallet app — Fade can't read client-custody wallets yet. "
+    "Trading and withdrawals through Fade aren't supported for this wallet "
+    "either; /security explains."
+)
+
 
 async def _render_overview(wallets, telegram_user_id: int, address: str, header: str) -> str:
-    balance = await wallets.get_balance(telegram_user_id)
+    if await wallets.get_custody(telegram_user_id) == "client":
+        balance_display = CLIENT_BALANCE_DISPLAY
+    else:
+        balance = await wallets.get_balance(telegram_user_id)
+        balance_display = f"${format_balance(balance)} (pUSD)"
     deposit_addresses = await wallets.get_deposit_addresses(telegram_user_id)
     return OVERVIEW_TEXT.format(
         header=header,
-        balance=format_balance(balance),
+        balance_display=balance_display,
         deposit_lines=format_deposit_lines(deposit_addresses),
         address=address,
         commands=COMMANDS_TEXT,

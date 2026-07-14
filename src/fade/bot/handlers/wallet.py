@@ -28,14 +28,25 @@ FETCHING_TEXT = "Fetching your balance..."
 POSITIONS_VALUE_LINE = "Open positions: ${value}"
 POSITIONS_VALUE_UNAVAILABLE = "Open positions: value unavailable right now."
 
+# Client-custody wallets (PRD §7.8): the server can't sign, so it can't read
+# the pUSD balance either. Say so plainly instead of crashing or pretending.
+CLIENT_BALANCE_LINE = (
+    "Balance: check your wallet app — Fade can't read client-custody wallets yet."
+)
+CLIENT_CUSTODY_NOTE = (
+    "\nThis wallet's key lives on your device. Trading and withdrawals through "
+    "Fade aren't supported for it yet — /security explains both custody modes."
+)
+
 WALLET_TEXT = (
     "Wallet: `{address}`\n"
-    "Balance: ${balance} (pUSD)\n"
+    "{balance_line}\n"
     "{positions_line}\n\n"
     "To deposit, send USDC to your personal deposit address:\n"
     "{deposit_lines}\n\n"
     "Funds arrive as pUSD after bridge processing. "
     "You'll get a message here when a deposit is confirmed."
+    "{custody_note}"
 )
 
 
@@ -75,15 +86,23 @@ async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     progress = await update.message.reply_text(FETCHING_TEXT)
-    balance = await wallets.get_balance(update.effective_user.id)
+    custody = await wallets.get_custody(update.effective_user.id)
+    if custody == "client":
+        balance_line = CLIENT_BALANCE_LINE
+        custody_note = CLIENT_CUSTODY_NOTE
+    else:
+        balance = await wallets.get_balance(update.effective_user.id)
+        balance_line = f"Balance: ${format_balance(balance)} (pUSD)"
+        custody_note = ""
     deposit_addresses = await wallets.get_deposit_addresses(update.effective_user.id)
     positions_line = await _positions_line(context, address)
     await progress.edit_text(
         WALLET_TEXT.format(
             address=address,
-            balance=format_balance(balance),
+            balance_line=balance_line,
             positions_line=positions_line,
             deposit_lines=format_deposit_lines(deposit_addresses),
+            custody_note=custody_note,
         ),
         parse_mode="Markdown",
     )

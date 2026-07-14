@@ -53,6 +53,7 @@ def wallet_context(list_positions) -> MagicMock:
     wallets.get_wallet_address = AsyncMock(
         return_value="0xFadE00000000000000000000000000000000aaaa"
     )
+    wallets.get_custody = AsyncMock(return_value="server")  # classic mode
     wallets.get_balance = AsyncMock(return_value=Decimal("12.5"))
     wallets.get_deposit_addresses = AsyncMock(return_value={"evm": "0xDep05170000"})
     trading = MagicMock()
@@ -206,6 +207,7 @@ def start_context(settings, session_factory) -> MagicMock:
     wallets.get_wallet_address = AsyncMock(
         return_value="0xFadE00000000000000000000000000000000aaaa"
     )
+    wallets.get_custody = AsyncMock(return_value="server")  # classic mode
     wallets.get_balance = AsyncMock(return_value=Decimal("50"))
     wallets.get_deposit_addresses = AsyncMock(return_value={"evm": "0xDep05170000"})
     trading = MagicMock()

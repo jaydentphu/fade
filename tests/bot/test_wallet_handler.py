@@ -18,6 +18,7 @@ def make_context(with_wallet: bool = True) -> MagicMock:
     context.bot.username = "fadetest_bot"
     wallets = MagicMock()
     wallets.get_wallet_address = AsyncMock(return_value=FAKE_ADDRESS if with_wallet else None)
+    wallets.get_custody = AsyncMock(return_value="server")  # classic mode
     wallets.get_balance = AsyncMock(return_value=Decimal("12.5"))
     wallets.get_deposit_addresses = AsyncMock(
         return_value={"evm": FAKE_EVM_DEPOSIT, "svm": "SoLFakeAddr"}

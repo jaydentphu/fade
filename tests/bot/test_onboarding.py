@@ -21,6 +21,7 @@ def make_context(settings, session_factory, has_wallet: bool = True) -> MagicMoc
     wallets = MagicMock()
     wallets.create_wallet = AsyncMock(return_value=FAKE_ADDRESS)
     wallets.get_wallet_address = AsyncMock(return_value=FAKE_ADDRESS if has_wallet else None)
+    wallets.get_custody = AsyncMock(return_value="server")  # classic mode
     wallets.get_balance = AsyncMock(return_value=Decimal("0"))
     wallets.get_deposit_addresses = AsyncMock(return_value={"evm": FAKE_EVM_DEPOSIT})
     context.application.bot_data = {

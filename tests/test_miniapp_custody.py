@@ -34,10 +34,19 @@ CLIENT_ADDRESS = "0xC11e0000000000000000000000000000000000aa"
 FAKE_KEY = "0x" + "ab" * 32  # obviously fake; must never leave the "browser"
 
 
-def signed_init_data(user_id: int, bot_token: str = BOT_TOKEN) -> str:
-    """Build initData signed exactly the way Telegram signs it."""
+def signed_init_data(
+    user_id: int, bot_token: str = BOT_TOKEN, auth_date: int | None = None
+) -> str:
+    """Build initData signed exactly the way Telegram signs it.
+
+    Stage 16 fixture correction: auth_date defaults to NOW because the
+    validator now (rightly) rejects stale initData — the old hard-coded
+    epoch would be a replay by definition. Pass auth_date to test staleness.
+    """
+    import time
+
     fields = {
-        "auth_date": "1780000000",
+        "auth_date": str(auth_date if auth_date is not None else int(time.time())),
         "query_id": "AAtest",
         "user": json.dumps({"id": user_id, "first_name": "Tester"}),
     }
@@ -63,6 +72,51 @@ def test_tampered_init_data_is_rejected():
     assert validate_init_data(data, "wrong-token") is None
     assert validate_init_data("", BOT_TOKEN) is None
     assert validate_init_data("no-hash-at-all=1", BOT_TOKEN) is None
+
+
+# -- (Stage 16) initData freshness: a valid signature is not enough ----------------
+
+
+def test_stale_init_data_is_rejected_and_fresh_accepted():
+    from fade.miniapp import INIT_DATA_MAX_AGE_S
+
+    minted_at = 1_780_000_000
+    data = signed_init_data(USER_ID, auth_date=minted_at)
+
+    fresh_clock = minted_at + 60  # a minute after the Mini App opened
+    stale_clock = minted_at + INIT_DATA_MAX_AGE_S + 1  # just past the window
+    assert validate_init_data(data, BOT_TOKEN, now=lambda: fresh_clock) is not None
+    assert validate_init_data(data, BOT_TOKEN, now=lambda: stale_clock) is None
+
+    # Missing or garbage auth_date is never valid, even correctly signed.
+    import hashlib as _hl
+    import hmac as _hmac
+    from urllib.parse import urlencode as _enc
+
+    for bad_fields in (
+        {"query_id": "AAtest", "user": json.dumps({"id": USER_ID})},  # missing
+        {"auth_date": "not-a-number", "query_id": "AAtest"},  # non-numeric
+    ):
+        check = "\n".join(f"{k}={v}" for k, v in sorted(bad_fields.items()))
+        secret = _hmac.new(b"WebAppData", BOT_TOKEN.encode(), _hl.sha256).digest()
+        bad_fields["hash"] = _hmac.new(secret, check.encode(), _hl.sha256).hexdigest()
+        assert validate_init_data(_enc(bad_fields), BOT_TOKEN) is None
+
+
+async def test_register_rejects_replayed_old_init_data(settings, session_factory):
+    await onboarded_user(session_factory)
+    wallets = WalletService(settings, session_factory)
+    # Correctly signed, but minted long ago: a captured/replayed initData.
+    body = {
+        "init_data": signed_init_data(USER_ID, auth_date=1_780_000_000),
+        "address": CLIENT_ADDRESS,
+    }
+
+    response = await handle_register(session_factory, wallets, BOT_TOKEN, body)
+
+    assert response.status_code == 401
+    async with session_factory() as session:
+        assert (await session.scalar(select(Wallet))) is None  # no state change
 
 
 # -- (1) the register endpoint ------------------------------------------------------
@@ -180,6 +234,7 @@ def attest_context(settings, session_factory, has_wallet: bool = False) -> Magic
     wallets.get_wallet_address = AsyncMock(
         return_value="0xFadE0000000000000000000000000000000000aa" if has_wallet else None
     )
+    wallets.get_custody = AsyncMock(return_value="server")  # classic mode
     wallets.get_balance = AsyncMock(return_value=Decimal("0"))
     wallets.get_deposit_addresses = AsyncMock(return_value={"evm": "0xDep05170000"})
     context.application.bot_data = {
