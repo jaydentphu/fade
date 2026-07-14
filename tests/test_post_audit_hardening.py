@@ -46,6 +46,7 @@ def dm_update() -> MagicMock:
     progress.edit_text = AsyncMock()
     progress.delete = AsyncMock()
     update.message.reply_text = AsyncMock(return_value=progress)
+    update.message.reply_photo = AsyncMock()  # the F-2 deposit QR
     update.callback_query = None
     return update
 

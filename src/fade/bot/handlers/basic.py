@@ -23,6 +23,8 @@ COMMANDS: tuple[tuple[str, str], ...] = (
     ("export", "Export your private key (DM)"),
     ("trending", "What's hot on Polymarket right now"),
     ("search", "Find a specific market"),
+    ("history", "Your recent orders (DM)"),
+    ("slippage", "View or set your worst-price guard (DM)"),
     ("setup", "Register this group as a clan"),
     ("join", "Enlist in this group's clan"),
     ("leaderboard", "Clan rankings: weekly + all-time"),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -20,6 +20,18 @@ SELL_CONFIRM_TEXT = (
     "Sell {shares} {outcome} — {title}\n"
     "Slippage guard and Fade's 1% builder fee apply. Tap Confirm to execute."
 )
+
+# Partial sells (Stage 17). Share precision: fractions are quantized to the
+# position ledger's 6 decimal places, ROUNDED DOWN so a partial sell can
+# never exceed what's held. 100% uses the exact held amount, as always.
+PARTIAL_PERCENTS = (25, 50)
+SHARE_PRECISION = Decimal("0.000001")
+
+
+def sell_amount(shares: Decimal, percent: int) -> Decimal:
+    if percent >= 100:
+        return Decimal(shares)
+    return (Decimal(shares) * percent / 100).quantize(SHARE_PRECISION, rounding=ROUND_DOWN)
 
 
 async def _cache_position(context: ContextTypes.DEFAULT_TYPE, view) -> str:
@@ -93,12 +105,18 @@ async def sell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await query.answer(NOT_YOUR_POSITION_ALERT, show_alert=True)
         return
     await query.answer()
+    # Confirm defaults to the full position (today's behavior, the 100% path);
+    # the second row offers partial sells, each with its own confirm step.
     keyboard = InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("Confirm", callback_data=f"psc:{key}"),
                 InlineKeyboardButton("Cancel", callback_data="tx"),
-            ]
+            ],
+            [
+                InlineKeyboardButton(f"Sell {pct}%", callback_data=f"psp:{key}:{pct}")
+                for pct in PARTIAL_PERCENTS
+            ],
         ]
     )
     await query.edit_message_text(
@@ -109,17 +127,60 @@ async def sell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
-async def sell_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def sell_partial_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A partial percentage was picked: show its own confirm step."""
     query = update.callback_query
     if query is None or query.data is None or update.effective_user is None:
         return
-    key = query.data.split(":")[1]
+    _, key, pct_raw = query.data.split(":")
+    percent = int(pct_raw)
     view = await _get_position(context, key)
     if view is None:
         await query.answer()
         await query.edit_message_text("That card expired. Run /positions again.")
         return
     if view.owner_id and update.effective_user.id != view.owner_id:
+        await query.answer(NOT_YOUR_POSITION_ALERT, show_alert=True)
+        return
+    if percent not in PARTIAL_PERCENTS:  # forged callback: not offered, not sold
+        await query.answer(NOT_YOUR_POSITION_ALERT, show_alert=True)
+        return
+    await query.answer()
+    amount = sell_amount(view.shares, percent)
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Confirm", callback_data=f"psc:{key}:{percent}"),
+                InlineKeyboardButton("Cancel", callback_data="tx"),
+            ]
+        ]
+    )
+    await query.edit_message_text(
+        SELL_CONFIRM_TEXT.format(
+            shares=f"{amount} ({percent}% of {view.shares})",
+            outcome=view.outcome,
+            title=sanitize(view.title),
+        ),
+        reply_markup=keyboard,
+    )
+
+
+async def sell_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.data is None or update.effective_user is None:
+        return
+    parts = query.data.split(":")
+    key = parts[1]
+    percent = int(parts[2]) if len(parts) > 2 else 100  # bare psc: = full sell
+    view = await _get_position(context, key)
+    if view is None:
+        await query.answer()
+        await query.edit_message_text("That card expired. Run /positions again.")
+        return
+    if view.owner_id and update.effective_user.id != view.owner_id:
+        await query.answer(NOT_YOUR_POSITION_ALERT, show_alert=True)
+        return
+    if percent != 100 and percent not in PARTIAL_PERCENTS:
         await query.answer(NOT_YOUR_POSITION_ALERT, show_alert=True)
         return
     await query.answer()
@@ -131,7 +192,7 @@ async def sell_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
         token_id=view.token_id,
         market_title=view.title,
         side="SELL",
-        amount=Decimal(view.shares),
+        amount=sell_amount(view.shares, percent),
     )
     await render_result(query, result, f"Sold {view.outcome}", view.title)
 

@@ -34,6 +34,7 @@ def make_update(chat_type: str = "private") -> MagicMock:
     progress = MagicMock()
     progress.edit_text = AsyncMock()
     update.message.reply_text = AsyncMock(return_value=progress)
+    update.message.reply_photo = AsyncMock()  # the F-2 deposit QR
     return update
 
 

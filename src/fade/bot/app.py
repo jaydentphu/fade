@@ -24,12 +24,14 @@ from fade.bot.handlers import (
     deposits,
     discover,
     export,
+    history,
     onboarding,
     positions,
     record,
     resolutions,
     router,
     security,
+    slippage,
     trade,
     wallet,
     withdraw,
@@ -179,6 +181,8 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("stats", admin.stats))
     app.add_handler(CommandHandler("ping", basic.ping))
     app.add_handler(CommandHandler("help", basic.help_command))
+    app.add_handler(CommandHandler("slippage", slippage.slippage))
+    app.add_handler(CommandHandler("history", history.history))
 
     # Callback queries
     app.add_handler(
@@ -188,7 +192,9 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CallbackQueryHandler(trade.confirm_callback, pattern="^tc:"))
     app.add_handler(CallbackQueryHandler(trade.cancel_callback, pattern="^tx$"))
     app.add_handler(CallbackQueryHandler(positions.sell_callback, pattern="^ps:"))
+    app.add_handler(CallbackQueryHandler(positions.sell_partial_callback, pattern="^psp:"))
     app.add_handler(CallbackQueryHandler(positions.sell_confirm_callback, pattern="^psc:"))
+    app.add_handler(CallbackQueryHandler(slippage.set_callback, pattern="^sl:"))
     app.add_handler(CallbackQueryHandler(withdraw.confirm_callback, pattern="^wd:"))
     app.add_handler(
         CallbackQueryHandler(export.export_callback, pattern=f"^{export.EXPORT_CALLBACK}$")

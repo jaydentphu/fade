@@ -17,6 +17,7 @@ dependencies = [
     "uvicorn>=0.30",
     "asyncpg>=0.30",
     "pillow>=12.3.0",
+    "qrcode>=8.2",
 ]
 
 [project.scripts]
