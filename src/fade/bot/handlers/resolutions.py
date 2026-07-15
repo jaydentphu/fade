@@ -147,11 +147,20 @@ class ResolutionScanner:
             logger.exception("flex card generation failed for %s", telegram_user_id)
             await report_safely(self._reporter, error, user_id=telegram_user_id)
             return
+        # Growth loop (D-14): the flex card is the artifact that leaves the
+        # group chat — its caption carries the winner's referral link so a
+        # shared screenshot's owner can answer "what app is that" in one tap.
+        from fade.bot.handlers.invite import referral_link
+
+        caption = (
+            "Called it. Share the receipt.\n"
+            f"Ride with me: {referral_link(getattr(bot, 'username', 'fade'), telegram_user_id)}"
+        )
         try:
             await bot.send_photo(
                 chat_id=telegram_user_id,
                 photo=image,
-                caption="Called it. Share the receipt.",
+                caption=caption,
             )
         except Exception as error:
             # The crown DM already landed; losing the flex card is cosmetic.

@@ -129,3 +129,29 @@ it for the case that matters (a destination the user has never withdrawn to befo
   "checksummed" promise; mixed-case input with a wrong checksum is rejected),
   /export key messages self-deleting after 5 minutes, and owner-locking on
   /positions sell cards (a card issued to user A rejects taps from user B).
+
+## D-14. Referral attribution (PRD J1's "taps a friend's referral link")
+Decided 2026-07-14 during Stage 18 (growth loop). Attribution and links ONLY —
+the PRD explicitly defers points/rewards/token mechanics, and none exist here.
+
+- **Link form:** `t.me/<bot>?start=ref<referrer telegram id>`, handed out by
+  `/invite` and stamped onto flex-card captions (the one artifact designed to
+  leave the group chat).
+- **Attribution rules:** `users.referred_by` is written exactly once, at User-row
+  creation during attestation, and never re-written. A referral payload is
+  ignored when: the arriving user already has a row (no re-attribution, ever),
+  the referrer id is the user's own (no self-referrals), or the referrer id
+  doesn't exist in users (no attribution to ghosts). The payload is remembered
+  from /start through the attestation tap via per-user context state, so the
+  attribution survives the gate to wallet creation.
+- **Why attestation-completion is the counting event:** a /start that never
+  attests is a drive-by, not a user — counting it would inflate recruit numbers
+  with people who never agreed to the terms and can't trade. Attestation is the
+  exact moment someone becomes a real account (F-1), so `/invite`'s and
+  `/record`'s "recruits" count `referred_by = me AND attestation_accepted_at IS
+  NOT NULL`. Funding-based counting (PRD's activation metric) was considered and
+  rejected for v1: it would make the recruit number lag deposits and feel broken
+  in demos; revisit if referral gaming ever matters.
+- **Surfaced on /record** (not /stats): recruits are bragging rights and belong
+  on the public rap sheet next to streaks and fades; /stats is the admin ops
+  digest and stays aggregate-only.

@@ -38,6 +38,9 @@ class User(Base):
     slippage_bps: Mapped[int] = mapped_column(Integer, default=200)
     # PRD F-17 privacy toggle: hide dollar amounts in group broadcasts.
     hide_amounts: Mapped[bool] = mapped_column(Boolean, default=False)
+    # PRD J1 referral attribution (D-14): who recruited this user. Set once,
+    # at User-row creation, never re-attributed. No rewards mechanics.
+    referred_by: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     wallet: Mapped[Wallet | None] = relationship(back_populates="user")

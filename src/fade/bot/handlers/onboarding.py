@@ -94,6 +94,17 @@ async def _render_overview(wallets, telegram_user_id: int, address: str, header:
     )
 
 
+def _referrer_from(payload) -> int | None:
+    """Parse a `ref<id>` deep-link payload. Anything else (including the
+    MagicMock-shaped values handler tests pass) is simply not a referral."""
+    if not isinstance(payload, str) or not payload.startswith("ref"):
+        return None
+    try:
+        return int(payload[3:])
+    except ValueError:
+        return None
+
+
 async def _route_deep_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Route a /start payload into the flow the user tapped for. True if routed."""
     payload = (context.args[0] if context.args else "").lower()
@@ -157,6 +168,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(RESUME_SETUP_TEXT, reply_markup=keyboard)
         return
 
+    # Referral attribution (PRD J1, D-14): remembered ONLY for a brand-new
+    # user (no row yet), and written when the row is created at attestation.
+    # Existing users fall through the branches above and are never touched.
+    referrer_id = _referrer_from(context.args[0] if context.args else "")
+    if referrer_id is not None and user is None:
+        context.user_data["referrer_id"] = referrer_id
+
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("I confirm all of the above", callback_data=ATTEST_CALLBACK)]]
     )
@@ -174,10 +192,22 @@ async def attest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     wallets = context.application.bot_data["wallets"]
     tg_user = update.effective_user
 
+    referrer_id = context.user_data.pop("referrer_id", None)
     async with sessions() as session:
         user = await session.scalar(select(User).where(User.telegram_user_id == tg_user.id))
         if user is None:
             user = User(telegram_user_id=tg_user.id)
+            # D-14: attribution is written exactly once, at row creation —
+            # valid, non-self, EXISTING referrers only; anything else is NULL.
+            if (
+                isinstance(referrer_id, int)
+                and referrer_id != tg_user.id
+                and await session.scalar(
+                    select(User).where(User.telegram_user_id == referrer_id)
+                )
+                is not None
+            ):
+                user.referred_by = referrer_id
             session.add(user)
         user.username = tg_user.username
         if user.attestation_accepted_at is None:

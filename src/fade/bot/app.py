@@ -25,6 +25,7 @@ from fade.bot.handlers import (
     discover,
     export,
     history,
+    invite,
     onboarding,
     positions,
     record,
@@ -183,6 +184,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("help", basic.help_command))
     app.add_handler(CommandHandler("slippage", slippage.slippage))
     app.add_handler(CommandHandler("history", history.history))
+    app.add_handler(CommandHandler("invite", invite.invite))
 
     # Callback queries
     app.add_handler(

@@ -26,6 +26,8 @@ class UserRecord:
     streak: int  # +N = N consecutive wins, -N = N consecutive losses, 0 = none
     most_faded_username: str | None
     most_faded_count: int
+    # Attested users this person referred (D-14). Bragging rights, no rewards.
+    recruits: int = 0
 
     @property
     def win_rate(self) -> float | None:
@@ -58,6 +60,17 @@ async def compute_record(session_factory, telegram_user_id: int) -> UserRecord |
                 .limit(1)
             )
         ).first()
+        recruits = (
+            await session.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(
+                    User.referred_by == telegram_user_id,
+                    User.attestation_accepted_at.is_not(None),
+                )
+            )
+            or 0
+        )
         most_faded_username = None
         most_faded_count = 0
         if target_row is not None:
@@ -95,4 +108,5 @@ async def compute_record(session_factory, telegram_user_id: int) -> UserRecord |
         streak=streak,
         most_faded_username=most_faded_username,
         most_faded_count=most_faded_count,
+        recruits=recruits,
     )

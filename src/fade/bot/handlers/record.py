@@ -25,7 +25,8 @@ RECORD_TEXT = (
     "Biggest win: {biggest_win}\n"
     "Biggest loss: {biggest_loss}\n"
     "Current streak: {streak}\n"
-    "Most faded: {most_faded}"
+    "Most faded: {most_faded}\n"
+    "Recruits: {recruits}"
 )
 
 
@@ -90,5 +91,6 @@ async def record(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ),
             streak=_fmt_streak(user_record.streak),
             most_faded=most_faded,
+            recruits=user_record.recruits,
         )
     )

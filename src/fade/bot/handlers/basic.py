@@ -29,6 +29,7 @@ COMMANDS: tuple[tuple[str, str], ...] = (
     ("join", "Enlist in this group's clan"),
     ("leaderboard", "Clan rankings: weekly + all-time"),
     ("record", "A member's all-time record"),
+    ("invite", "Your referral link + recruit count"),
     ("challenge", "Head-to-head wager: /challenge @user <link>"),
     ("privacy", "Hide or show your trade sizes in broadcasts"),
     ("security", "What Fade can and cannot do with your funds"),
