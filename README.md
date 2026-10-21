@@ -5,7 +5,7 @@
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![python-telegram-bot 21+](https://img.shields.io/badge/python--telegram--bot-21%2B-26A5E4?logo=telegram&logoColor=white)
 ![Polymarket CLOB on Polygon](https://img.shields.io/badge/Polymarket_CLOB-Polygon-7B3FE4?logo=polygon&logoColor=white)
-![tests 289 passing](https://img.shields.io/badge/tests-289%20passing-4c1?logo=pytest&logoColor=white)
+![tests 368 passing](https://img.shields.io/badge/tests-368%20passing-4c1?logo=pytest&logoColor=white)
 ![license proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)
 
 A Telegram bot for trading Polymarket prediction markets — solo in DMs, or head-to-head in group chats where every trade can be copied or faded by one tap.
@@ -18,7 +18,8 @@ Trading Polymarket normally means leaving Telegram, opening a browser, connectin
 
 - **Paste-a-link trading** — drop a Polymarket URL in DM, get a market card with live prices, buy YES/NO with preset or custom sizes
 - **Copy / Fade** — every trade in a group chat broadcasts as a card with one-tap buttons: Copy mirrors the trade, Fade takes the opposite side
-- **Clans and leaderboards** — register a group as a clan, track weekly and all-time PnL, run clan-vs-clan league rankings
+- **Clans** — form a team with a name, icon, and photo; invite friends by link, promote officers, kick members; clans compete on daily, weekly, and all-time boards ranked by both % ROI and $ PnL, with weekly results posted to the clan's home group chat
+- **Group leaderboards** — every group chat ranks its own members by realized PnL, volume, and win rate, weekly and all-time
 - **Head-to-head challenges** — challenge a specific user to a wager on a market; both sides execute automatically when accepted
 - **Flex cards** — every settled position gets a shareable PnL card (green "Called it" for wins, red "Got faded" for losses), and a Flex button in `/positions` cards any open position mid-trade; each carries a QR code to the sharer's referral link
 - **Non-custodial wallets** — each user gets their own on-chain wallet; deposits, withdrawals, and position exports happen directly from the bot
