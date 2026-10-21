@@ -21,7 +21,7 @@ from sqlalchemy import select
 from telegram.error import Forbidden
 
 from fade.bot.handlers.common import sanitize
-from fade.db.models import ClanMember, User
+from fade.db.models import GroupMember, User
 from fade.errors import ErrorReporter, report_safely
 
 logger = logging.getLogger(__name__)
@@ -206,7 +206,7 @@ def render_trade_card(
 async def clans_of_user(session_factory, telegram_user_id: int) -> list[int]:
     async with session_factory() as session:
         rows = await session.scalars(
-            select(ClanMember.chat_id).where(ClanMember.telegram_user_id == telegram_user_id)
+            select(GroupMember.chat_id).where(GroupMember.telegram_user_id == telegram_user_id)
         )
         return list(rows)
 

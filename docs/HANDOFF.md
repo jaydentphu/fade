@@ -6,7 +6,7 @@ the world as of Stage 7 and had gone badly stale — it claimed 142 tests and
 that F-23/F-24/F-26 were "not started." All of that is obsolete below.
 
 Read this first, then [PRD.md](PRD.md) (spec), [DECISIONS.md](DECISIONS.md)
-(D-1 to D-13), [SPIKE-NOTES.md](SPIKE-NOTES.md) (SDK findings),
+(D-1 to D-15), [SPIKE-NOTES.md](SPIKE-NOTES.md) (SDK findings),
 [ROADMAP.md](ROADMAP.md) (Stages 4–9, all complete),
 [ROADMAP-PART3.md](ROADMAP-PART3.md) (Stages 10–15, all complete), and
 [ROADMAP-PART4.md](ROADMAP-PART4.md) (Stages 16–21: 16 is this stage;
@@ -54,8 +54,8 @@ friend in one group chat will teach more than any further stage.
 | F-12 `/positions` | ✅ | owner-locked sell cards; full-position sells only (partials — Stage 17) |
 | F-13 confirmations | ✅ | builder fee + estimated Polymarket platform fee itemized (Stage 13) |
 | F-14 resolution notify | ✅ | crown/roast + flex card, isolated per-user failures |
-| F-16–F-20 clans/broadcast/leaderboard | ✅ | + Forbidden→deactivation cleanup (Stage 11) |
-| F-21 clan league | ✅ | skips deactivated clans |
+| F-16–F-20 group broadcast/leaderboard | ✅ | + Forbidden→deactivation cleanup (Stage 11). D-15: registered groups are `GroupChat`s now, not clans |
+| F-21 clan league | ✅ | D-15: clans are teams (`social/clans.py`, `bot/handlers/clan_hub.py`); `/clan`, `/clans` (today/week/all × ROI/$); weekly result to home chat or owner DM |
 | F-22 `/record` | ✅ | |
 | F-23 flex cards | ✅ | Stage 8; Pillow, brand palette, idempotent DM |
 | F-24 `/challenge` | ✅ | Stage 9 + Stage 14 (text_mention opponents, challenger withdraw) |
@@ -96,7 +96,8 @@ and Telegram's "/" menu.
   eth_getLogs chunks). DEPLOYMENT.md §2 mandates a keyed provider in prod.
 - **`fade_events` history starts at Stage 7's migration** — older
   fades/copies are invisible to `/record`'s "most faded" stat.
-- **`compute_league` PnL% is volume-weighted** (total_pnl / total_volume).
+- **Clan ROI is realized PnL ÷ closed cost basis** (D-15; it was PnL ÷ volume
+  before). Unrealized PnL never counts, so a clan can't win a week on paper.
 - **Mini App scripts are CDN-loaded with SRI pins** (Stage 16). Telegram
   serves telegram-web-app.js UNVERSIONED, so its pin will fail closed when
   Telegram updates it — refresh the hash in `src/fade/miniapp.py` then.

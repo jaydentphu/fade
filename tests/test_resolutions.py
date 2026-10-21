@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy import select
 
 from fade.bot.handlers.resolutions import FLEX_LOSS_CAPTION, ResolutionScanner, ResolvedPosition
-from fade.db.models import Clan, ClanMember, Resolution, User, Wallet
+from fade.db.models import GroupChat, GroupMember, Resolution, User, Wallet
 from fade.social.leaderboard import compute_leaderboard
 
 USER_ID = 980
@@ -127,8 +127,8 @@ async def test_held_to_resolution_position_counts_on_the_leaderboard(
     """D-6: resolution-realized PnL ranks identically in shape to sell-based."""
     await seed_wallet(session_factory, onboard)
     async with session_factory() as session:
-        session.add(Clan(chat_id=CHAT_ID, title="Degens", created_by=USER_ID))
-        session.add(ClanMember(chat_id=CHAT_ID, telegram_user_id=USER_ID))
+        session.add(GroupChat(chat_id=CHAT_ID, title="Degens", created_by=USER_ID))
+        session.add(GroupMember(chat_id=CHAT_ID, telegram_user_id=USER_ID))
         user = await session.scalar(select(User).where(User.telegram_user_id == USER_ID))
         user.username = f"user{USER_ID}"
         await session.commit()
@@ -152,8 +152,8 @@ async def test_losing_resolution_counts_as_a_loss_on_the_leaderboard(
 ):
     await seed_wallet(session_factory, onboard)
     async with session_factory() as session:
-        session.add(Clan(chat_id=CHAT_ID, title="Degens", created_by=USER_ID))
-        session.add(ClanMember(chat_id=CHAT_ID, telegram_user_id=USER_ID))
+        session.add(GroupChat(chat_id=CHAT_ID, title="Degens", created_by=USER_ID))
+        session.add(GroupMember(chat_id=CHAT_ID, telegram_user_id=USER_ID))
         await session.commit()
 
     scanner = ResolutionScanner(session_factory, fetch=make_fetch([LOSS]))

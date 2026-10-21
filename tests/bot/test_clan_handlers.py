@@ -11,7 +11,7 @@ from sqlalchemy import select
 from telegram import Update
 
 from fade.bot.handlers import clan
-from fade.db.models import Clan, ClanMember, Order, User
+from fade.db.models import GroupChat, GroupMember, Order, User
 
 CHAT_ID = -100777
 USER_ID = 901
@@ -50,8 +50,8 @@ async def test_setup_registers_group_as_clan(settings, session_factory, onboard)
     await clan.setup(update, context)
 
     async with session_factory() as session:
-        row = await session.get(Clan, CHAT_ID)
-        member = await session.get(ClanMember, (CHAT_ID, USER_ID))
+        row = await session.get(GroupChat, CHAT_ID)
+        member = await session.get(GroupMember, (CHAT_ID, USER_ID))
     assert row is not None
     assert row.title == "Degens Anonymous"
     assert row.created_by == USER_ID
@@ -68,7 +68,7 @@ async def test_setup_rejected_in_dm(settings, session_factory, onboard):
 
     assert update.message.reply_text.call_args.args[0] == clan.GROUP_ONLY_TEXT
     async with session_factory() as session:
-        assert await session.get(Clan, CHAT_ID) is None
+        assert await session.get(GroupChat, CHAT_ID) is None
 
 
 async def test_setup_twice_does_not_duplicate(settings, session_factory, onboard):
@@ -92,7 +92,7 @@ async def test_join_enrolls_member_after_setup(settings, session_factory, onboar
     await clan.join(joiner, context)
 
     async with session_factory() as session:
-        assert await session.get(ClanMember, (CHAT_ID, 902)) is not None
+        assert await session.get(GroupMember, (CHAT_ID, 902)) is not None
     assert "joined the clan" in joiner.message.reply_text.call_args.args[0]
 
 

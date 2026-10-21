@@ -18,9 +18,10 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from fade.bot.cards import get_store
+from fade.bot.handlers import clan_hub
 from fade.bot.handlers.common import sanitize
 from fade.bot.handlers.trade import user_onboarded
-from fade.db.models import Clan, ClanMember, FadeEvent, User
+from fade.db.models import FadeEvent, GroupChat, GroupMember, User
 from fade.social.broadcast import PendingMessage, hide_amounts_for, render_trade_card
 from fade.social.leaderboard import EASTERN, compute_leaderboard, week_start
 
@@ -94,13 +95,13 @@ def _is_group(update: Update) -> bool:
 async def _add_member(session_factory, chat_id: int, telegram_user_id: int) -> bool:
     """Idempotently record clan membership. Returns True if newly added."""
     async with session_factory() as session:
-        clan = await session.get(Clan, chat_id)
+        clan = await session.get(GroupChat, chat_id)
         if clan is None:
             return False
-        existing = await session.get(ClanMember, (chat_id, telegram_user_id))
+        existing = await session.get(GroupMember, (chat_id, telegram_user_id))
         if existing is not None:
             return False
-        session.add(ClanMember(chat_id=chat_id, telegram_user_id=telegram_user_id))
+        session.add(GroupMember(chat_id=chat_id, telegram_user_id=telegram_user_id))
         await session.commit()
         return True
 
@@ -122,11 +123,12 @@ async def setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     sessions = context.application.bot_data["sessions"]
     chat = update.effective_chat
     async with sessions() as session:
-        if await session.get(Clan, chat.id) is not None:
+        if await session.get(GroupChat, chat.id) is not None:
             await update.message.reply_text(ALREADY_SETUP_TEXT)
+            await clan_hub.offer_home(update, context)
             return
         session.add(
-            Clan(
+            GroupChat(
                 chat_id=chat.id,
                 title=sanitize(chat.title or "Unnamed clan", limit=100),
                 created_by=update.effective_user.id,
@@ -137,6 +139,8 @@ async def setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         SETUP_DONE_TEXT.format(title=sanitize(chat.title or "Unnamed clan", limit=100))
     )
+    # D-15: a clan leader running /setup can claim this chat as clan home.
+    await clan_hub.offer_home(update, context)
 
 
 async def join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -152,7 +156,7 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     sessions = context.application.bot_data["sessions"]
     async with sessions() as session:
-        if await session.get(Clan, update.effective_chat.id) is None:
+        if await session.get(GroupChat, update.effective_chat.id) is None:
             await update.message.reply_text(JOIN_NEED_SETUP_TEXT)
             return
     added = await _add_member(sessions, update.effective_chat.id, update.effective_user.id)
@@ -242,9 +246,9 @@ async def broadcast_fill(
     async with sessions() as session:
         chat_ids = list(
             await session.scalars(
-                select(ClanMember.chat_id)
-                .join(Clan, Clan.chat_id == ClanMember.chat_id)
-                .where(ClanMember.telegram_user_id == telegram_user_id, Clan.active)
+                select(GroupMember.chat_id)
+                .join(GroupChat, GroupChat.chat_id == GroupMember.chat_id)
+                .where(GroupMember.telegram_user_id == telegram_user_id, GroupChat.active)
             )
         )
     if not chat_ids:

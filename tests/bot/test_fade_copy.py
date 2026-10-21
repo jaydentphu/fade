@@ -93,11 +93,11 @@ async def seed_clan_with_members(context, session_factory, onboard) -> None:
     await onboard(MARCUS)
     sessions = session_factory
     async with sessions() as session:
-        from fade.db.models import Clan, ClanMember
+        from fade.db.models import GroupChat, GroupMember
 
-        session.add(Clan(chat_id=CHAT_ID, title="Degens", created_by=PRIYA))
-        session.add(ClanMember(chat_id=CHAT_ID, telegram_user_id=PRIYA))
-        session.add(ClanMember(chat_id=CHAT_ID, telegram_user_id=MARCUS))
+        session.add(GroupChat(chat_id=CHAT_ID, title="Degens", created_by=PRIYA))
+        session.add(GroupMember(chat_id=CHAT_ID, telegram_user_id=PRIYA))
+        session.add(GroupMember(chat_id=CHAT_ID, telegram_user_id=MARCUS))
         await session.commit()
 
 

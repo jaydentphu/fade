@@ -14,6 +14,7 @@ from sqlalchemy import select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import ContextTypes
 
+from fade.bot.handlers import clan_hub
 from fade.bot.handlers.basic import COMMANDS_TEXT
 from fade.bot.handlers.common import (
     GROUP_REDIRECT_TEXT,
@@ -108,6 +109,13 @@ def _referrer_from(payload) -> int | None:
 async def _route_deep_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Route a /start payload into the flow the user tapped for. True if routed."""
     payload = (context.args[0] if context.args else "").lower()
+    if clan_hub.clan_code_from(payload) is not None:
+        # Clan invite link (D-15): the join confirm screen.
+        await clan_hub.resume_pending_invite(update.message, context, update.effective_user.id)
+        return True
+    if payload == "clan":
+        await clan_hub.clan_command(update, context)
+        return True
     if payload == "withdraw":
         from fade.bot.handlers.withdraw import withdraw
 
@@ -147,6 +155,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = await session.scalar(
             select(User).where(User.telegram_user_id == update.effective_user.id)
         )
+    # A clan invite link survives onboarding: remembered now, offered right
+    # after the wallet exists (or immediately, for existing users).
+    clan_code = clan_hub.clan_code_from(context.args[0] if context.args else "")
+    if clan_code is not None:
+        context.user_data[clan_hub.INVITE_KEY] = clan_code
     if user is not None and user.onboarded:
         # Attested, but wallet creation may have failed midway: offer to resume.
         address = await wallets.get_wallet_address(update.effective_user.id)
@@ -245,3 +258,4 @@ async def attest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     text = await _render_overview(wallets, tg_user.id, address, OVERVIEW_HEADER_NEW)
     await query.edit_message_text(text, parse_mode="Markdown")
+    await clan_hub.resume_pending_invite(query.message, context, tg_user.id)

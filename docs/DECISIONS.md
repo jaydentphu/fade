@@ -155,3 +155,59 @@ the PRD explicitly defers points/rewards/token mechanics, and none exist here.
 - **Surfaced on /record** (not /stats): recruits are bragging rights and belong
   on the public rap sheet next to streaks and fades; /stats is the admin ops
   digest and stays aggregate-only.
+
+## D-15. Clans are teams, not group chats (supersedes F-16's "group = clan")
+Decided 2026-10-21 with Jayden, after researching pvp.trade's model
+(docs/CLANS-PLAN.md has the research and the full plan). PRD.md is not edited;
+this entry is the record of the departure.
+
+- **Split:** the old `clans`/`clan_members` tables were always *registered group
+  chats*; they are now `group_chats`/`group_members` (models `GroupChat`/
+  `GroupMember`) and keep every job they had — /setup, broadcasts, Copy/Fade,
+  the per-group /leaderboard, challenges, Forbidden→deactivation. `clans` is a
+  new table: a named team with an icon, an owner, officers and members, and an
+  optional home group chat. Migration `5c1a7e9d3b20` backfills one clan per
+  active registered group (home chat = that group, owner = whoever ran /setup).
+- **One clan per user**, enforced by a partial unique index (one open stint per
+  user). The backfill puts each user in the earliest group they joined, keeping
+  the original join time so their past trades stay credited.
+- **Roles:** owner (everything), officers (invite, kick members, regenerate the
+  link, link a home chat), members. Inviting is owner/officer only (Jayden's
+  call). Owners must transfer before leaving; a sole owner leaving disbands.
+  Every permission is enforced in `social/clans.py`, never only in a handler.
+- **Identity:** name 3–24 chars, Latin letters/digits/spaces/`.'!-`, unique
+  case-insensitively among live clans (no `_[]*` — `sanitize()` strips those,
+  so the name would render differently than typed). Rename once per 7 days.
+  Icon from a 24-emoji picker. Optional photo stored as a Telegram `file_id`
+  only (never the bytes). Optional motto ≤ 80 chars. `/clanreset` (admin)
+  wipes name/photo/motto for moderation.
+- **Invites:** `t.me/<bot>?start=clan<code>`, 10 lowercase alphanumerics
+  (/start payloads are lowercased). Regenerating kills old links. The code
+  survives onboarding like D-14's referral payload does. In a group,
+  `/clan invite` (optionally as a reply, to draft someone) posts a URL button.
+- **Cooldowns:** a kicked user can't rejoin that clan for 24h. Switching clans
+  is limited to once per 24h of the last join — waived when the last stint
+  ended by kick or disband (punish hopping, not being kicked).
+- **Scoring (realized only, as D-6):** $ PnL = sum of members' realized PnL;
+  % ROI = that PnL ÷ the cost basis of the positions closed (sells: average
+  cost × shares; resolutions: shares × avg price). Replaces the old league's
+  PnL ÷ volume, which counted buys *and* sells and read a clean double as +50%.
+  Windows: today (since 18:00 ET), this week (D-6), all time.
+- **Unknown cost basis doesn't score:** a sell of shares with no recorded buy
+  (e.g. acquired outside the bot) has no cost to subtract, so its whole
+  proceeds would read as profit. Clan boards skip those closes. The per-group
+  /leaderboard keeps its D-6 behaviour unchanged.
+- **Attribution:** a closed trade counts for the clan its trader was in when it
+  closed (memberships are `[joined_at, left_at)` stints). Leaving doesn't erase
+  history; switching doesn't import PnL.
+- **Eligibility:** ≥3 current members to rank on either board (pvp.trade's
+  rule); the ROI board additionally needs ≥$100 of closed cost basis in the
+  window. Unranked clans still see their own line and why.
+- **Weekly result** (Sunday 18:00 ET, the existing job): each clan gets its rank
+  on both boards, the top clan, and its MVP — in its home chat, or the owner's
+  DM when it has none or the home chat is deactivated. An MVP with /privacy on
+  is named without a dollar figure.
+- **Bug fixed on the way:** the per-group weekly /leaderboard filtered orders by
+  date *before* computing cost basis, so a sell this week of a position bought
+  last week counted its full proceeds as profit. Basis now comes from full
+  history; only the realizations are windowed.

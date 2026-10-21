@@ -13,7 +13,7 @@ from telegram import Update
 
 from fade.bot.handlers import clan, trade
 from fade.bot.handlers.common import edit_card
-from fade.db.models import Clan, ClanMember
+from fade.db.models import GroupChat, GroupMember
 from fade.social import trade_card
 from fade.social.broadcast import BroadcastQueue, PendingMessage, render_trade_card
 from fade.trading.markets import MarketCard
@@ -72,9 +72,9 @@ async def seed_clan(session_factory, onboard) -> None:
     await onboard(PRIYA)
     await onboard(MARCUS)
     async with session_factory() as session:
-        session.add(Clan(chat_id=CHAT_ID, title="Degens", created_by=PRIYA))
-        session.add(ClanMember(chat_id=CHAT_ID, telegram_user_id=PRIYA))
-        session.add(ClanMember(chat_id=CHAT_ID, telegram_user_id=MARCUS))
+        session.add(GroupChat(chat_id=CHAT_ID, title="Degens", created_by=PRIYA))
+        session.add(GroupMember(chat_id=CHAT_ID, telegram_user_id=PRIYA))
+        session.add(GroupMember(chat_id=CHAT_ID, telegram_user_id=MARCUS))
         await session.commit()
 
 

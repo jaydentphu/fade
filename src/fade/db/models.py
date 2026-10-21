@@ -14,12 +14,14 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -143,8 +145,9 @@ class WithdrawalAddress(Base):
     )
 
 
-class Clan(Base):
-    """A group chat registered via /setup (PRD F-16).
+class GroupChat(Base):
+    """A group chat registered via /setup (PRD F-16). Was the `clans` table
+    until D-15 split clans (teams) from the group chats they broadcast into.
 
     `active=False` means the bot was removed from the chat (Telegram Forbidden
     on send): broadcasts, league announcements, and challenge settlements skip
@@ -152,7 +155,7 @@ class Clan(Base):
     (orders, fade_events, resolutions all reference this chat's members).
     """
 
-    __tablename__ = "clans"
+    __tablename__ = "group_chats"
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     title: Mapped[str] = mapped_column(String(128))
@@ -161,16 +164,88 @@ class Clan(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class ClanMember(Base):
+class GroupMember(Base):
     """Membership observed from group activity (/setup, /join, fade/copy taps)."""
 
-    __tablename__ = "clan_members"
+    __tablename__ = "group_members"
 
-    chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("clans.chat_id"), primary_key=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("group_chats.chat_id"), primary_key=True
+    )
     telegram_user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.telegram_user_id"), primary_key=True
     )
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Clan(Base):
+    """A team (D-15): name, icon, owner, members. Not a group chat — a clan
+    can optionally link one group as its home chat for announcements.
+
+    Disbanding stamps `disbanded_at` instead of deleting, so past memberships
+    (and the PnL they earned the clan) stay attributable. The partial unique
+    indexes only bind live clans: a disbanded clan's name and home chat are
+    free to reuse.
+    """
+
+    __tablename__ = "clans"
+    __table_args__ = (
+        Index(
+            "uq_clans_live_name",
+            "name_key",
+            unique=True,
+            sqlite_where=text("disbanded_at IS NULL"),
+            postgresql_where=text("disbanded_at IS NULL"),
+        ),
+        Index(
+            "uq_clans_live_home_chat",
+            "home_chat_id",
+            unique=True,
+            sqlite_where=text("disbanded_at IS NULL AND home_chat_id IS NOT NULL"),
+            postgresql_where=text("disbanded_at IS NULL AND home_chat_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(32))
+    name_key: Mapped[str] = mapped_column(String(32))  # casefolded, for uniqueness
+    icon: Mapped[str] = mapped_column(String(16))
+    # Telegram file_id of the clan photo: a reference, never the image bytes.
+    photo_file_id: Mapped[str | None] = mapped_column(String(256))
+    motto: Mapped[str | None] = mapped_column(String(120))
+    owner_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_user_id"))
+    home_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    invite_code: Mapped[str] = mapped_column(String(16), unique=True)
+    renamed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    disbanded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ClanMembership(Base):
+    """One stint in a clan: [joined_at, left_at). Kept after leaving so a
+    closed trade is credited to the clan its trader was in when it closed
+    (D-15 attribution). At most one open stint per user (partial index)."""
+
+    __tablename__ = "clan_memberships"
+    __table_args__ = (
+        Index(
+            "uq_clan_memberships_open",
+            "telegram_user_id",
+            unique=True,
+            sqlite_where=text("left_at IS NULL"),
+            postgresql_where=text("left_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    clan_id: Mapped[int] = mapped_column(ForeignKey("clans.id"), index=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_user_id"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(8))  # owner | officer | member
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    left_reason: Mapped[str | None] = mapped_column(String(12))  # left | kicked | disbanded
 
 
 class FadeEvent(Base):

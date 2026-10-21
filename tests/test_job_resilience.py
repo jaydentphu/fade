@@ -23,15 +23,16 @@ from fade.db.models import (
     ChainScanState,
     Challenge,
     Clan,
-    ClanMember,
     Deposit,
+    GroupChat,
+    GroupMember,
     Resolution,
     UiCard,
     User,
     Wallet,
 )
 from fade.social.broadcast import MAX_SEND_ATTEMPTS, BroadcastQueue, PendingMessage
-from fade.social.league import compute_league
+from fade.social.league import announce_league
 from fade.trading.markets import MarketCard
 
 USER_A, USER_B = 601, 602
@@ -249,10 +250,10 @@ async def test_failure_in_one_chat_does_not_block_other_chats(session_factory):
 async def seed_clans(session_factory) -> None:
     async with session_factory() as session:
         session.add(User(telegram_user_id=USER_A))
-        session.add(Clan(chat_id=CHAT_GOOD, title="Alive", created_by=USER_A))
-        session.add(Clan(chat_id=CHAT_DEAD, title="Kicked", created_by=USER_A))
-        session.add(ClanMember(chat_id=CHAT_GOOD, telegram_user_id=USER_A))
-        session.add(ClanMember(chat_id=CHAT_DEAD, telegram_user_id=USER_A))
+        session.add(GroupChat(chat_id=CHAT_GOOD, title="Alive", created_by=USER_A))
+        session.add(GroupChat(chat_id=CHAT_DEAD, title="Kicked", created_by=USER_A))
+        session.add(GroupMember(chat_id=CHAT_GOOD, telegram_user_id=USER_A))
+        session.add(GroupMember(chat_id=CHAT_DEAD, telegram_user_id=USER_A))
         await session.commit()
 
 
@@ -269,7 +270,7 @@ async def test_forbidden_deactivates_clan_and_stops_future_sends(session_factory
 
     async def deactivate(chat_id: int) -> None:
         async with session_factory() as session:
-            clan = await session.get(Clan, chat_id)
+            clan = await session.get(GroupChat, chat_id)
             clan.active = False
             await session.commit()
 
@@ -283,8 +284,8 @@ async def test_forbidden_deactivates_clan_and_stops_future_sends(session_factory
     assert sent == [CHAT_GOOD]  # the healthy clan is unaffected
     assert queue.pending_count(CHAT_DEAD) == 0  # the dead chat's queue was dropped
     async with session_factory() as session:
-        dead = await session.get(Clan, CHAT_DEAD)
-        good = await session.get(Clan, CHAT_GOOD)
+        dead = await session.get(GroupChat, CHAT_DEAD)
+        good = await session.get(GroupChat, CHAT_GOOD)
     assert dead.active is False
     assert good.active is True
     assert any(isinstance(err, Forbidden) for err, _ in reporter.reported)
@@ -296,7 +297,7 @@ async def test_deactivated_clan_is_skipped_by_broadcast_fill_league_and_settleme
     """The three downstream surfaces all skip an inactive clan."""
     await seed_clans(session_factory)
     async with session_factory() as session:
-        clan = await session.get(Clan, CHAT_DEAD)
+        clan = await session.get(GroupChat, CHAT_DEAD)
         clan.active = False
         await session.commit()
 
@@ -323,9 +324,25 @@ async def test_deactivated_clan_is_skipped_by_broadcast_fill_league_and_settleme
     assert queue.pending_count(CHAT_GOOD) == 1
     assert queue.pending_count(CHAT_DEAD) == 0
 
-    # league: the inactive clan is not ranked.
-    standings = await compute_league(session_factory, datetime.now(UTC))
-    assert [s.chat_id for s in standings] == [CHAT_GOOD]
+    # league (D-15: clans are teams now; a dead group can only be a clan's
+    # HOME chat): the weekly result must not be queued into the dead chat —
+    # it falls back to the owner's DM instead.
+    async with session_factory() as session:
+        session.add(
+            Clan(
+                name="Kicked Clan",
+                name_key="kicked clan",
+                icon="⚔️",
+                owner_id=USER_A,
+                home_chat_id=CHAT_DEAD,
+                invite_code="deadhome01",
+            )
+        )
+        await session.commit()
+    league_queue = BroadcastQueue(send=AsyncMock())
+    assert await announce_league(session_factory, league_queue, datetime.now(UTC)) == 1
+    assert league_queue.pending_count(CHAT_DEAD) == 0
+    assert league_queue.pending_count(USER_A) == 1
 
     # challenge settlement: no message to the deactivated chat, but the
     # challenge still transitions to settled (it can never deliver anyway).

@@ -15,6 +15,9 @@ NOT_ADMIN_TEXT = "Nice try. This button belongs to the management."
 PAUSED_TEXT = "Trading is now PAUSED. New orders are rejected; withdrawals stay live."
 RESUMED_TEXT = "Trading is now LIVE again."
 STATS_DM_ONLY_TEXT = "Stats are DM-only. Message me directly."
+CLAN_RESET_USAGE_TEXT = "Usage: /clanreset <clan name>"
+CLAN_RESET_MISSING_TEXT = "No live clan by that name."
+CLAN_RESET_DONE_TEXT = "Reset: name is now {name}; photo and motto cleared."
 
 
 def _is_admin(context: ContextTypes.DEFAULT_TYPE, telegram_user_id: int) -> bool:
@@ -62,3 +65,34 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     now = datetime.now(UTC)
     digest = await compute_digest(context.application.bot_data["sessions"], now)
     await update.message.reply_text(render_digest(digest, now))
+
+
+async def clan_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/clanreset <name>: moderation for user-made clan identity (D-15). Wipes
+    the photo and motto and renames to a neutral placeholder. Admin only."""
+    if update.message is None or update.effective_user is None:
+        return
+    if not _is_admin(context, update.effective_user.id):
+        await update.message.reply_text(NOT_ADMIN_TEXT)
+        return
+    from sqlalchemy import select
+
+    from fade.db.models import Clan
+    from fade.social import clans
+
+    name = " ".join(context.args or [])
+    if not name:
+        await update.message.reply_text(CLAN_RESET_USAGE_TEXT)
+        return
+    sessions = context.application.bot_data["sessions"]
+    async with sessions() as session:
+        clan_id = await session.scalar(
+            select(Clan.id).where(
+                Clan.name_key == clans.name_key(name), Clan.disbanded_at.is_(None)
+            )
+        )
+    clan = await clans.admin_reset(sessions, clan_id) if clan_id is not None else None
+    if clan is None:
+        await update.message.reply_text(CLAN_RESET_MISSING_TEXT)
+        return
+    await update.message.reply_text(CLAN_RESET_DONE_TEXT.format(name=clan.name))

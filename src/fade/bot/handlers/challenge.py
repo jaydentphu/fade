@@ -50,7 +50,7 @@ from fade.bot.handlers.clan import (
 )
 from fade.bot.handlers.common import sanitize
 from fade.bot.handlers.trade import MARKET_CLOSED_TEXT, user_onboarded
-from fade.db.models import Challenge, Clan, Resolution
+from fade.db.models import Challenge, GroupChat, Resolution
 from fade.errors import ErrorReporter, report_safely
 from fade.trading.markets import MarketLookupError
 
@@ -475,10 +475,10 @@ async def withdraw_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def _chat_deactivated(session_factory, chat_id: int) -> bool:
-    """True when the chat is a clan the bot was removed from (Clan.active=False).
+    """True when the chat is a clan the bot was removed from (GroupChat.active=False).
     Non-clan group chats have no Clan row and are never considered deactivated."""
     async with session_factory() as session:
-        clan = await session.get(Clan, chat_id)
+        clan = await session.get(GroupChat, chat_id)
     return clan is not None and not clan.active
 
 

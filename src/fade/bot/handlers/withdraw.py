@@ -90,6 +90,7 @@ async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     context.user_data["withdraw"] = {"step": "amount"}
+    context.user_data.pop("clan_flow", None)  # newest flow owns the next reply
     await update.message.reply_text(ASK_AMOUNT_TEXT)
 
 

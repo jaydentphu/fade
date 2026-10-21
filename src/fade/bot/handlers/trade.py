@@ -173,6 +173,7 @@ async def size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     if size == "c":
         context.user_data["pending_custom"] = (key, side_letter)
+        context.user_data.pop("clan_flow", None)  # newest flow owns the next reply
         await query.message.reply_text(CUSTOM_PROMPT_TEXT)
         return
     await _show_confirm(query, card, key, side_letter, Decimal(size))

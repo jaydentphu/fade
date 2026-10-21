@@ -21,6 +21,7 @@ from fade.bot.handlers import (
     basic,
     challenge,
     clan,
+    clan_hub,
     deposits,
     discover,
     export,
@@ -138,10 +139,10 @@ def build_application(settings: Settings) -> Application:
     async def _deactivate_clan(chat_id: int) -> None:
         # Bot removed from the chat (Forbidden): deactivate, don't delete —
         # leaderboard/record history references this clan's members.
-        from fade.db.models import Clan
+        from fade.db.models import GroupChat
 
         async with sessions() as session:
-            clan = await session.get(Clan, chat_id)
+            clan = await session.get(GroupChat, chat_id)
             if clan is not None and clan.active:
                 clan.active = False
                 await session.commit()
@@ -177,6 +178,9 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("join", clan.join))
     app.add_handler(CommandHandler("privacy", clan.privacy))
     app.add_handler(CommandHandler("leaderboard", clan.leaderboard))
+    app.add_handler(CommandHandler("clan", clan_hub.clan_command))
+    app.add_handler(CommandHandler("clans", clan_hub.clans_command))
+    app.add_handler(CommandHandler("clanreset", admin.clan_reset))
     app.add_handler(CommandHandler("record", record.record))
     app.add_handler(CommandHandler("challenge", challenge.challenge))
     app.add_handler(CommandHandler("security", security.security))
@@ -211,6 +215,10 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CallbackQueryHandler(clan.size_callback, pattern="^s[fc]:"))
     app.add_handler(CallbackQueryHandler(clan.confirm_callback, pattern="^gc:"))
     app.add_handler(CallbackQueryHandler(clan.cancel_callback, pattern="^gx:"))
+    # Clans as teams (D-15)
+    app.add_handler(CallbackQueryHandler(clan_hub.clan_callback, pattern="^cl:"))
+    app.add_handler(CallbackQueryHandler(clan_hub.board_callback, pattern="^cb:"))
+    app.add_handler(CallbackQueryHandler(clan_hub.home_callback, pattern="^ch:"))
     # Head-to-head challenges (F-24)
     app.add_handler(CallbackQueryHandler(challenge.pick_callback, pattern="^hp:"))
     app.add_handler(CallbackQueryHandler(challenge.accept_callback, pattern="^ha:"))
@@ -225,6 +233,11 @@ def build_application(settings: Settings) -> Application:
         MessageHandler(
             filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, router.handle_text
         )
+    )
+
+    # Photos in DMs: only consumed while a clan owner is setting the clan photo
+    app.add_handler(
+        MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, clan_hub.handle_clan_photo)
     )
 
     app.add_error_handler(_log_error)

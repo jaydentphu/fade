@@ -7,7 +7,7 @@ from decimal import Decimal
 from itertools import count
 from zoneinfo import ZoneInfo
 
-from fade.db.models import Clan, ClanMember, Order, User
+from fade.db.models import GroupChat, GroupMember, Order, User
 from fade.social.leaderboard import EASTERN, compute_leaderboard, week_start
 
 CHAT_ID = -100500
@@ -34,7 +34,7 @@ def test_week_start_handles_other_timezones():
 
 async def seed_clan(session_factory, members: list[int]) -> None:
     async with session_factory() as session:
-        session.add(Clan(chat_id=CHAT_ID, title="Degens", created_by=members[0]))
+        session.add(GroupChat(chat_id=CHAT_ID, title="Degens", created_by=members[0]))
         for user_id in members:
             session.add(
                 User(
@@ -43,7 +43,7 @@ async def seed_clan(session_factory, members: list[int]) -> None:
                     attestation_accepted_at=datetime.now(UTC),
                 )
             )
-            session.add(ClanMember(chat_id=CHAT_ID, telegram_user_id=user_id))
+            session.add(GroupMember(chat_id=CHAT_ID, telegram_user_id=user_id))
         await session.commit()
 
 
@@ -142,6 +142,22 @@ async def test_partial_sell_realizes_against_average_cost(settings, session_fact
 
 async def test_empty_clan_returns_no_rows(settings, session_factory):
     async with session_factory() as session:
-        session.add(Clan(chat_id=CHAT_ID, title="Ghost town", created_by=1))
+        session.add(GroupChat(chat_id=CHAT_ID, title="Ghost town", created_by=1))
         await session.commit()
     assert await compute_leaderboard(session_factory, CHAT_ID) == []
+
+
+async def test_weekly_sell_realizes_against_a_buy_from_before_the_week(settings, session_factory):
+    """Regression (found building D-15): the weekly board filtered orders by
+    date BEFORE computing cost basis, so selling this week a position bought
+    last week counted the full $15 proceeds as profit instead of +$5."""
+    await seed_clan(session_factory, [ALICE])
+    async with session_factory() as session:
+        session.add(make_order(ALICE, "BUY", "10", "20", et(2026, 7, 3)))  # last week
+        session.add(make_order(ALICE, "SELL", "15", "20", et(2026, 7, 8)))  # this week
+        await session.commit()
+
+    weekly = await compute_leaderboard(session_factory, CHAT_ID, since=week_start(et(2026, 7, 8)))
+    assert weekly[0].realized_pnl == Decimal("5")
+    assert weekly[0].volume == Decimal("15")  # volume is still this week's orders only
+    assert weekly[0].closed_trades == 1
