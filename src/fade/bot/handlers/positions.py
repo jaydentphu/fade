@@ -1,7 +1,13 @@
-"""/positions with one-tap sell (PRD F-12). DM-only: positions reveal balances."""
+"""/positions with one-tap sell (PRD F-12) and on-demand flex cards (F-23).
+
+DM-only: positions reveal balances. A flex card is sent to the owner's DM;
+sharing it onward is the owner's call.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import replace
 from decimal import ROUND_DOWN, Decimal
 
@@ -11,10 +17,19 @@ from telegram.ext import ContextTypes
 from fade.bot.cards import get_store
 from fade.bot.handlers.common import GROUP_REDIRECT_TEXT, dm_button, sanitize
 from fade.bot.handlers.trade import NOT_ONBOARDED_TEXT, render_result, user_onboarded
+from fade.errors import report_safely
+
+logger = logging.getLogger(__name__)
 
 NO_POSITIONS_TEXT = "No open positions. Paste a Polymarket link to change that."
 FETCHING_TEXT = "Fetching positions..."
 NOT_YOUR_POSITION_ALERT = "That position belongs to someone else."
+CARD_EXPIRED_ALERT = "That card expired. Run /positions again."
+FLEX_RENDERING_TOAST = "Printing your receipt…"
+FLEX_FAILED_ALERT = "Couldn't render that one. Try again in a moment."
+# Written to be forwarded: the caption travels with the image.
+FLEX_CAPTION = "Think I'm wrong? Fade me:\n{link}"
+FLEX_CAPTION_NO_LINK = "Think I'm wrong? Come fade me on Fade."
 SELL_CONFIRM_TEXT = (
     "Confirm sell (market order, fill-or-kill):\n\n"
     "Sell {shares} {outcome} — {title}\n"
@@ -85,9 +100,59 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Stamp the card with its owner so sell taps can be owner-locked.
         view = replace(view, owner_id=update.effective_user.id)
         key = await _cache_position(context, view)
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Sell", callback_data=f"ps:{key}")]])
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("Sell", callback_data=f"ps:{key}"),
+                    InlineKeyboardButton("✨ Flex", callback_data=f"pf:{key}"),
+                ]
+            ]
+        )
         await update.message.reply_text(render_position_line(view), reply_markup=keyboard)
     await progress.delete()
+
+
+async def flex_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Flex tapped: render a live-PnL card for this open position (F-23, the
+    memecoin-bot pattern) and send it to the owner to forward wherever.
+
+    The position card stays as it was — flexing doesn't consume it, so the
+    owner can still Sell from it afterwards.
+    """
+    query = update.callback_query
+    if query is None or query.data is None or update.effective_user is None:
+        return
+    key = query.data.split(":")[1]
+    view = await _get_position(context, key)
+    if view is None:
+        await query.answer(CARD_EXPIRED_ALERT, show_alert=True)
+        return
+    if view.owner_id and update.effective_user.id != view.owner_id:
+        await query.answer(NOT_YOUR_POSITION_ALERT, show_alert=True)
+        return
+    await query.answer(FLEX_RENDERING_TOAST)
+
+    # Late imports: the social layer imports handler helpers.
+    from fade.bot.handlers.invite import bot_referral_link
+    from fade.social.flex_card import generate_open_flex_card, held_duration
+
+    user_id = update.effective_user.id
+    link = bot_referral_link(context.bot, user_id)
+    try:
+        held = await held_duration(context.application.bot_data["sessions"], user_id, view.token_id)
+        # Rendering is CPU-bound (~200 ms): keep it off the event loop.
+        image = await asyncio.to_thread(
+            generate_open_flex_card, view, referral_link=link, held=held
+        )
+        await query.message.reply_photo(
+            photo=image,
+            caption=FLEX_CAPTION.format(link=link) if link else FLEX_CAPTION_NO_LINK,
+        )
+    except Exception as error:
+        logger.exception("flex render/send failed for user %s", user_id)
+        reporter = context.application.bot_data.get("error_reporter")
+        await report_safely(reporter, error, user_id=user_id)
+        await query.message.reply_text(FLEX_FAILED_ALERT)
 
 
 async def sell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

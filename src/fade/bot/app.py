@@ -195,6 +195,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CallbackQueryHandler(trade.cancel_callback, pattern="^tx$"))
     app.add_handler(CallbackQueryHandler(positions.sell_callback, pattern="^ps:"))
     app.add_handler(CallbackQueryHandler(positions.sell_partial_callback, pattern="^psp:"))
+    app.add_handler(CallbackQueryHandler(positions.flex_callback, pattern="^pf:"))
     app.add_handler(CallbackQueryHandler(positions.sell_confirm_callback, pattern="^psc:"))
     app.add_handler(CallbackQueryHandler(slippage.set_callback, pattern="^sl:"))
     app.add_handler(CallbackQueryHandler(withdraw.confirm_callback, pattern="^wd:"))

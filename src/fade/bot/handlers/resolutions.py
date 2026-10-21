@@ -12,6 +12,7 @@ confirmation screens stay plain; this one gets to talk.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -39,6 +40,9 @@ ROAST_TEXT = (
     "{shares} shares settled at zero. Somewhere, someone who faded you is "
     "smiling. Study the tape, come back meaner."
 )
+FLEX_WIN_CAPTION = "Called it. Share the receipt."
+FLEX_LOSS_CAPTION = "Got faded. Post it anyway — the record already has it."
+FLEX_LINK_LINE = "Ride with me: {link}"
 
 
 @dataclass(frozen=True)
@@ -132,30 +136,38 @@ class ResolutionScanner:
             logger.exception("resolution DM failed for user %s", telegram_user_id)
             await report_safely(self._reporter, error, user_id=telegram_user_id)
             return False
-        if won:
-            await self._send_flex_card(bot, telegram_user_id, position, pnl)
+        # Every settlement gets a flex card, memecoin-bot style: green for a
+        # call, red for a fade. Losses are half the fun of a public record.
+        await self._send_flex_card(bot, telegram_user_id, position, pnl, won)
         return True
 
     async def _send_flex_card(
-        self, bot: Any, telegram_user_id: int, position: ResolvedPosition, pnl: Decimal
+        self,
+        bot: Any,
+        telegram_user_id: int,
+        position: ResolvedPosition,
+        pnl: Decimal,
+        won: bool,
     ) -> None:
-        from fade.social.flex_card import generate_flex_card
+        from fade.bot.handlers.invite import bot_referral_link
+        from fade.social.flex_card import generate_flex_card, held_duration
 
+        # Growth loop (D-14): the flex card is the artifact that leaves the
+        # group chat — the referral link rides on it as a QR and in the caption.
+        link = bot_referral_link(bot, telegram_user_id)
         try:
-            image = generate_flex_card(position, pnl)
+            held = await held_duration(self._sessions, telegram_user_id, position.token_id)
+            # Rendering is CPU-bound (~200 ms): keep it off the event loop.
+            image = await asyncio.to_thread(
+                generate_flex_card, position, pnl, referral_link=link, held=held
+            )
         except Exception as error:
             logger.exception("flex card generation failed for %s", telegram_user_id)
             await report_safely(self._reporter, error, user_id=telegram_user_id)
             return
-        # Growth loop (D-14): the flex card is the artifact that leaves the
-        # group chat — its caption carries the winner's referral link so a
-        # shared screenshot's owner can answer "what app is that" in one tap.
-        from fade.bot.handlers.invite import referral_link
-
-        caption = (
-            "Called it. Share the receipt.\n"
-            f"Ride with me: {referral_link(getattr(bot, 'username', 'fade'), telegram_user_id)}"
-        )
+        caption = FLEX_WIN_CAPTION if won else FLEX_LOSS_CAPTION
+        if link:
+            caption += f"\n{FLEX_LINK_LINE.format(link=link)}"
         try:
             await bot.send_photo(
                 chat_id=telegram_user_id,

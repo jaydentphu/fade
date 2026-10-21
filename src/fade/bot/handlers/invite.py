@@ -29,6 +29,21 @@ def referral_link(bot_username: str, telegram_user_id: int) -> str:
     return f"https://t.me/{bot_username}?start=ref{telegram_user_id}"
 
 
+def bot_referral_link(bot, telegram_user_id: int) -> str:
+    """Referral link from a live Bot object, or "" if its username is unknown.
+
+    Deliberately no fallback name: a guessed username would point the QR on
+    a shared flex card at somebody else's bot.
+    """
+    try:
+        username = bot.username
+    except Exception:  # PTB raises if the bot was never initialized
+        return ""
+    if not isinstance(username, str) or not username:
+        return ""
+    return referral_link(username, telegram_user_id)
+
+
 async def count_recruits(session_factory, telegram_user_id: int) -> int:
     """Users this person referred who COMPLETED attestation (D-14)."""
     async with session_factory() as session:

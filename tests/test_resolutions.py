@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy import select
 
-from fade.bot.handlers.resolutions import ResolutionScanner, ResolvedPosition
+from fade.bot.handlers.resolutions import FLEX_LOSS_CAPTION, ResolutionScanner, ResolvedPosition
 from fade.db.models import Clan, ClanMember, Resolution, User, Wallet
 from fade.social.leaderboard import compute_leaderboard
 
@@ -92,8 +92,12 @@ async def test_losing_resolution_sends_exactly_one_roast_dm(settings, session_fa
     assert "💀" in text and "against you" in text  # roast voice
     assert "11.00" in text  # settlement PnL (magnitude)
     assert "rain" in text
-    # Losses don't get a flex card — there's nothing to flex.
-    bot.send_photo.assert_not_awaited()
+    # Spec change (flex card redesign): losses now get a red "GOT FADED" card
+    # too, memecoin-bot style. This assertion previously pinned the old
+    # wins-only rule (assert_not_awaited); it's updated, not weakened —
+    # still exactly-once, and now also checks it's the loss variant.
+    bot.send_photo.assert_awaited_once()
+    assert bot.send_photo.call_args.kwargs["caption"].startswith(FLEX_LOSS_CAPTION)
 
 
 async def test_polling_same_resolution_twice_never_double_notifies(
