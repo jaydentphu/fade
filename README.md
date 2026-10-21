@@ -5,12 +5,12 @@
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![python-telegram-bot 21+](https://img.shields.io/badge/python--telegram--bot-21%2B-26A5E4?logo=telegram&logoColor=white)
 ![Polymarket CLOB on Polygon](https://img.shields.io/badge/Polymarket_CLOB-Polygon-7B3FE4?logo=polygon&logoColor=white)
-![tests 252 passing](https://img.shields.io/badge/tests-252%20passing-4c1?logo=pytest&logoColor=white)
+![tests 272 passing](https://img.shields.io/badge/tests-272%20passing-4c1?logo=pytest&logoColor=white)
 ![license proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)
 
 A Telegram bot for trading Polymarket prediction markets — solo in DMs, or head-to-head in group chats where every trade can be copied or faded by one tap.
 
-**Status: pre-launch.** The bot is code-complete and covered by 252 passing tests, but it has not been deployed to production and has never handled real user funds. The custody model below is implemented and tested; it has not yet been exercised against live money.
+**Status: pre-launch.** The bot is code-complete and covered by 272 passing tests, but it has not been deployed to production and has never handled real user funds. The custody model below is implemented and tested; it has not yet been exercised against live money.
 
 ## Why
 
@@ -22,6 +22,7 @@ Trading Polymarket normally means leaving Telegram, opening a browser, connectin
 - **Copy / Fade** — every trade in a group chat broadcasts as a card with one-tap buttons: Copy mirrors the trade, Fade takes the opposite side
 - **Clans and leaderboards** — register a group as a clan, track weekly and all-time PnL, run clan-vs-clan league rankings
 - **Head-to-head challenges** — challenge a specific user to a wager on a market; both sides execute automatically when accepted
+- **Flex cards** — every settled position gets a shareable PnL card (green "Called it" for wins, red "Got faded" for losses), and a Flex button in `/positions` cards any open position mid-trade; each carries a QR code to the sharer's referral link
 - **Non-custodial wallets** — each user gets their own on-chain wallet; deposits, withdrawals, and position exports happen directly from the bot
 - **Order safety** — every order carries a worst-price slippage guard, a builder-fee attribution code, and an idempotency key so a retried Telegram webhook can never double-execute a trade
 - **Admin controls** — a kill switch that pauses new trading without blocking withdrawals, plus a daily digest of volume, fees, and errors
@@ -34,9 +35,9 @@ Trading Polymarket normally means leaving Telegram, opening a browser, connectin
       <sub><b>Copy / Fade</b> — the market card, the broadcast a member's trade posts to the group, and the reply the bot threads underneath after someone fades it. <i>(Design mockup.)</i></sub>
     </td>
     <td width="50%" valign="top">
-      <img src="assets/flex-card.png" alt="Generated card showing a resolved winning position: market question, side, entry and settled price, and profit" width="100%">
+      <img src="assets/flex-card.png" alt="Two generated flex cards: a green 'Called it' card for a winning position at +63.9%, and a red 'Got faded' card for a losing position at -100%, each with invested amount, profit or loss, entry and settled price, and a referral QR code" width="100%">
       <br>
-      <sub><b>Flex card</b> — real output from <code>src/fade/social/flex_card.py</code>, generated and DM'd to a user when one of their positions resolves in profit.</sub>
+      <sub><b>Flex cards</b> — real output from <code>src/fade/social/flex_card.py</code>, DM'd to a user when one of their positions settles, win or lose. The QR opens the bot on the sharer's referral link.</sub>
     </td>
   </tr>
 </table>
@@ -60,6 +61,7 @@ Every order is FOK (fill-or-kill) with a slippage guard computed from the live o
 - **Trading:** Polymarket's official `polymarket-client` SDK against the CLOB, via the Builders Program for fee attribution
 - **Chain access:** web3.py / eth-account for Polygon reads and signing, plain JSON-RPC for deposit detection
 - **Data:** SQLAlchemy 2.x + Alembic migrations; SQLite for dev, Postgres in production
+- **Images:** Pillow + qrcode for flex cards, set in the Geist typeface (OFL, vendored)
 - **Testing/tooling:** pytest + pytest-asyncio, ruff for lint/format, `uv` for dependency management
 
 ## Project layout
@@ -112,6 +114,7 @@ Production deployment (webhook mode, Postgres, process manager) is documented in
 - No limit orders yet — market orders (FOK) only.
 - No automatic "always copy this person" rule; Copy/Fade is a one-tap, per-trade action.
 - The broadcast queue that posts group trade cards is in-memory, so a process restart drops whatever hadn't been sent yet.
+- Flex cards render Latin text only: emoji and non-Latin characters (e.g. Chinese) are dropped from market titles rather than drawn as blank boxes.
 - This is a solo project built end-to-end by one person, including the security model — it hasn't had an external audit.
 
 ## Docs
