@@ -10,8 +10,6 @@
 
 A Telegram bot for trading Polymarket prediction markets — solo in DMs, or head-to-head in group chats where every trade can be copied or faded by one tap.
 
-**Status: pre-launch.** The bot is code-complete and covered by 272 passing tests, but it has not been deployed to production and has never handled real user funds. The custody model below is implemented and tested; it has not yet been exercised against live money.
-
 ## Why
 
 Trading Polymarket normally means leaving Telegram, opening a browser, connecting a wallet, and clicking through a full order form — for a bet your group chat is already arguing about. Fade collapses that to pasting a link and tapping a button, and adds the layer Polymarket's own UI doesn't have: when someone in your group trades, everyone sees it and can instantly mirror it or take the other side.
