@@ -101,7 +101,8 @@ def test_broadcast_card_handles_no_side_cents_and_odd_names():
 def test_every_fixed_trade_card_string_has_glyphs():
     fixed = [
         tc.STATUS_MARKET, tc.STATUS_NEW_POSITION, *tc.MARKET_CTA, *tc.BROADCAST_CTA,
-        tc.OPEN_SLOT, "VS", "chance", "of YES", "RESOLVES OPEN MARKET", *tc._MONTHS,
+        tc.OPEN_SLOT, tc.UNPRICED_LABEL, "VS", "chance", "of YES", "RESOLVES OPEN MARKET",
+        *tc._MONTHS,
         "YES NO 0123456789¢%$,.·—?",
     ]
     missing = {ch for text in fixed for ch in text if not flex_card.has_glyph(ch)}

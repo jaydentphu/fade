@@ -55,6 +55,7 @@ STATUS_NEW_POSITION = "NEW POSITION"
 MARKET_CTA = ("Think you know?", "Pick a side below")
 BROADCAST_CTA = ("Think they're wrong?", "Fade them below")
 OPEN_SLOT = "open slot"
+UNPRICED_LABEL = "No trades yet"
 
 _MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 _JPEG_QUALITY = 90  # Telegram recompresses photos anyway; JPEG keeps uploads ~1/3 of PNG
@@ -289,6 +290,14 @@ def render_market_card_image(data: MarketCardData) -> bytes:
                       "chance", font=_font(22, 500), fill=_MUTED)
             draw.text((left + box[2] - box[0] + 18, ink_top + (box[3] - box[1]) - 26),
                       "of YES", font=_font(22, 500), fill=_MUTED)
+        else:
+            # Unpriced (brand-new market): say so where the odds and bar would
+            # go, rather than leaving a hole in the middle of the card.
+            font = _font(40, 600)
+            box = draw.textbbox((0, 0), UNPRICED_LABEL, font=font)
+            gap_top, gap_bottom = title_end + 20, tile_top - 26
+            ink_top = gap_top + (gap_bottom - gap_top - (box[3] - box[1])) // 2
+            draw.text((left - box[0], ink_top - box[1]), UNPRICED_LABEL, font=font, fill=_MUTED)
 
         draw.line((left, divider_y, right, divider_y), fill=_DIVIDER, width=1)
         _cta(draw, left, cta_top, *MARKET_CTA)
