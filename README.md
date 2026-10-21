@@ -5,7 +5,7 @@
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![python-telegram-bot 21+](https://img.shields.io/badge/python--telegram--bot-21%2B-26A5E4?logo=telegram&logoColor=white)
 ![Polymarket CLOB on Polygon](https://img.shields.io/badge/Polymarket_CLOB-Polygon-7B3FE4?logo=polygon&logoColor=white)
-![tests 272 passing](https://img.shields.io/badge/tests-272%20passing-4c1?logo=pytest&logoColor=white)
+![tests 289 passing](https://img.shields.io/badge/tests-289%20passing-4c1?logo=pytest&logoColor=white)
 ![license proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)
 
 A Telegram bot for trading Polymarket prediction markets — solo in DMs, or head-to-head in group chats where every trade can be copied or faded by one tap.
@@ -28,9 +28,9 @@ Trading Polymarket normally means leaving Telegram, opening a browser, connectin
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="assets/market-card-and-broadcast.png" alt="Market card with YES/NO prices and preset sizes, a group broadcast of a member's position with copy and fade buttons, and the reply posted after a fade" width="100%">
+      <img src="assets/trade-cards.png" alt="Two generated trade cards: a market card showing a 61% chance of YES with a YES/NO probability bar and 61 and 39 cent prices, and a group broadcast card showing priya buying YES at 61 cents for $50 against an open NO slot" width="100%">
       <br>
-      <sub><b>Copy / Fade</b> — the market card, the broadcast a member's trade posts to the group, and the reply the bot threads underneath after someone fades it. <i>(Design mockup.)</i></sub>
+      <sub><b>Copy / Fade</b> — real output from <code>src/fade/social/trade_card.py</code>: the market card you get when you paste a link, and the card a member's buy posts to their clan. Fade and Copy buttons sit under it; Fade takes the open slot.</sub>
     </td>
     <td width="50%" valign="top">
       <img src="assets/flex-cards.png" alt="Two generated flex cards: a green 'Called it' card for a winning position at +63.9%, and a red 'Got faded' card for a losing position at -100%, each with invested amount, profit or loss, entry and settled price, and a referral QR code" width="100%">
@@ -59,7 +59,7 @@ Every order is FOK (fill-or-kill) with a slippage guard computed from the live o
 - **Trading:** Polymarket's official `polymarket-client` SDK against the CLOB, via the Builders Program for fee attribution
 - **Chain access:** web3.py / eth-account for Polygon reads and signing, plain JSON-RPC for deposit detection
 - **Data:** SQLAlchemy 2.x + Alembic migrations; SQLite for dev, Postgres in production
-- **Images:** Pillow + qrcode for flex cards, set in the Geist typeface (OFL, vendored)
+- **Images:** Pillow + qrcode for the trade and flex cards, set in the Geist typeface (OFL, vendored)
 - **Testing/tooling:** pytest + pytest-asyncio, ruff for lint/format, `uv` for dependency management
 
 ## Project layout
@@ -69,7 +69,7 @@ src/fade/
   bot/         Telegram command and callback handlers
   trading/     Market lookup and order execution against the CLOB
   wallets/     Wallet creation, signing isolation, deposit/withdrawal
-  social/      Clans, leaderboards, broadcasts, flex cards
+  social/      Clans, leaderboards, broadcasts, trade and flex cards
   db/          SQLAlchemy models + Alembic migrations
   miniapp.py   Optional client-side-custody Mini App (flag-gated)
   webhook.py   Production FastAPI webhook receiver
