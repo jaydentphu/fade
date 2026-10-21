@@ -33,7 +33,7 @@ Trading Polymarket normally means leaving Telegram, opening a browser, connectin
       <sub><b>Copy / Fade</b> — the market card, the broadcast a member's trade posts to the group, and the reply the bot threads underneath after someone fades it. <i>(Design mockup.)</i></sub>
     </td>
     <td width="50%" valign="top">
-      <img src="assets/flex-card.png" alt="Two generated flex cards: a green 'Called it' card for a winning position at +63.9%, and a red 'Got faded' card for a losing position at -100%, each with invested amount, profit or loss, entry and settled price, and a referral QR code" width="100%">
+      <img src="assets/flex-cards.png" alt="Two generated flex cards: a green 'Called it' card for a winning position at +63.9%, and a red 'Got faded' card for a losing position at -100%, each with invested amount, profit or loss, entry and settled price, and a referral QR code" width="100%">
       <br>
       <sub><b>Flex cards</b> — real output from <code>src/fade/social/flex_card.py</code>, DM'd to a user when one of their positions settles, win or lose. The QR opens the bot on the sharer's referral link.</sub>
     </td>
