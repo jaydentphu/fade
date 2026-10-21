@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock
 
+from PIL import Image
 from telegram import Update
 
 from fade.bot.handlers import discover
@@ -83,6 +85,7 @@ async def test_view_callback_swaps_in_tradeable_card():
     update.callback_query = MagicMock()
     update.callback_query.answer = AsyncMock()
     update.callback_query.edit_message_text = AsyncMock()
+    update.callback_query.message.reply_photo = AsyncMock()
     context = make_context()
 
     from fade.bot.handlers.trade import cache_card
@@ -92,8 +95,15 @@ async def test_view_callback_swaps_in_tradeable_card():
 
     await discover.view_callback(update, context)
 
-    text = update.callback_query.edit_message_text.call_args.args[0]
+    # Spec change (trade card redesign): the tradeable card is now a photo,
+    # and Telegram can't turn the text results list into one, so it arrives
+    # as a new message instead of an in-place edit. Original assertions kept,
+    # now against the photo's caption and keyboard; the list is left intact.
+    update.callback_query.edit_message_text.assert_not_awaited()
+    kwargs = update.callback_query.message.reply_photo.call_args.kwargs
+    assert Image.open(BytesIO(kwargs["photo"])).format == "JPEG"
+    text = kwargs["caption"]
     assert "Will it rain tomorrow?" in text
-    markup = update.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
+    markup = kwargs["reply_markup"]
     labels = [b.text for row in markup.inline_keyboard for b in row]
     assert "🟢 YES $10" in labels and "🔴 NO custom" in labels

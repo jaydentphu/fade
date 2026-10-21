@@ -6,6 +6,8 @@ Confirmation screens are money screens: plain and precise.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
@@ -13,9 +15,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from fade.bot.cards import get_store
-from fade.bot.handlers.common import sanitize
+from fade.bot.handlers.common import edit_card, sanitize
 from fade.db.models import User
 from fade.trading.markets import MarketCard, MarketLookupError
+
+logger = logging.getLogger(__name__)
 
 PRESET_SIZES = ("10", "25", "50", "100", "250")
 BUTTONS_PER_ROW = 3
@@ -134,7 +138,26 @@ async def show_market_card(update: Update, context: ContextTypes.DEFAULT_TYPE, u
         return
 
     key = await cache_card(context, card)
-    await update.message.reply_text(render_card_text(card), reply_markup=card_keyboard(key))
+    await send_market_card(update.message, card, key)
+
+
+async def send_market_card(message, card: MarketCard, key: str) -> None:
+    """Post the market card as a reply to `message`: the rendered image, the
+    facts again as its caption (notification previews, search), and the side
+    and size buttons under it. If rendering fails it falls back to the text
+    card — trading must never depend on an image rendering."""
+    from fade.social.trade_card import generate_market_card
+
+    caption = render_card_text(card)
+    keyboard = card_keyboard(key)
+    try:
+        # Rendering is CPU-bound (~200 ms): keep it off the event loop.
+        image = await asyncio.to_thread(generate_market_card, card)
+    except Exception:
+        logger.exception("market card render failed; sending the text card")
+        await message.reply_text(caption, reply_markup=keyboard)
+        return
+    await message.reply_photo(photo=image, caption=caption, reply_markup=keyboard)
 
 
 async def size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -146,7 +169,7 @@ async def size_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     _, key, side_letter, size = query.data.split(":")
     card = await get_card(context, key)
     if card is None:
-        await query.edit_message_text(CARD_EXPIRED_TEXT)
+        await edit_card(query, CARD_EXPIRED_TEXT)
         return
     if size == "c":
         context.user_data["pending_custom"] = (key, side_letter)
@@ -200,7 +223,8 @@ async def _show_confirm(query, card: MarketCard, key: str, side_letter: str, amo
             ]
         ]
     )
-    await query.edit_message_text(
+    await edit_card(
+        query,
         CONFIRM_TEXT.format(action=action, question=sanitize(card.question), amount=amount),
         reply_markup=keyboard,
     )
@@ -213,12 +237,12 @@ async def confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     await query.answer()
     if not await user_onboarded(context, update.effective_user.id, update.effective_user):
-        await query.edit_message_text(NOT_ONBOARDED_TEXT)
+        await edit_card(query, NOT_ONBOARDED_TEXT)
         return
     _, key, side_letter, amount_raw = query.data.split(":")
     card = await get_card(context, key)
     if card is None:
-        await query.edit_message_text(CARD_EXPIRED_TEXT)
+        await edit_card(query, CARD_EXPIRED_TEXT)
         return
 
     trading = context.application.bot_data["trading"]
@@ -259,7 +283,8 @@ async def render_result(query, result, action: str, question: str) -> None:
             if getattr(result, "platform_fee", None) is not None
             else PLATFORM_FEE_UNAVAILABLE
         )
-        await query.edit_message_text(
+        await edit_card(
+            query,
             FILLED_TEXT.format(
                 action=action,
                 question=sanitize(question),
@@ -273,14 +298,14 @@ async def render_result(query, result, action: str, question: str) -> None:
     elif result.status == "duplicate":
         await query.answer(DUPLICATE_TEXT)
     elif result.status == "paused":
-        await query.edit_message_text(PAUSED_TEXT)
+        await edit_card(query, PAUSED_TEXT)
     elif result.status == "capped":
         # Money screen: the service's plain-language limit message, verbatim.
-        await query.edit_message_text(result.error)
+        await edit_card(query, result.error)
     elif result.status == "rejected":
-        await query.edit_message_text(REJECTED_TEXT.format(reason=result.error))
+        await edit_card(query, REJECTED_TEXT.format(reason=result.error))
     else:
-        await query.edit_message_text(FAILED_TEXT.format(reason=result.error))
+        await edit_card(query, FAILED_TEXT.format(reason=result.error))
 
 
 async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -288,4 +313,4 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query is None:
         return
     await query.answer()
-    await query.edit_message_text(CANCELLED_TEXT)
+    await edit_card(query, CANCELLED_TEXT)

@@ -14,7 +14,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from fade.bot.handlers.common import sanitize
-from fade.bot.handlers.trade import cache_card, card_keyboard, get_card, render_card_text
+from fade.bot.handlers.trade import cache_card, get_card, send_market_card
 from fade.trading.markets import truncate_utf8
 
 TRENDING_HEADER = "🔥 Trending on Polymarket — pick your poison:"
@@ -114,7 +114,12 @@ async def category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """A discovery result was tapped: swap the list for the tradeable card."""
+    """A discovery result was tapped: post its tradeable market card.
+
+    The card is a photo, and Telegram can't turn a text message into one, so
+    it arrives as a new message under the list — which also leaves the list
+    tappable for the other results.
+    """
     query = update.callback_query
     if query is None or query.data is None:
         return
@@ -124,4 +129,4 @@ async def view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if card is None:
         await query.edit_message_text("That card expired. Run the command again.")
         return
-    await query.edit_message_text(render_card_text(card), reply_markup=card_keyboard(key))
+    await send_market_card(query.message, card, key)

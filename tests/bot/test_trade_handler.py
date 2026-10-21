@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock
 
+from PIL import Image
 from telegram import Update
 
 from fade.bot.handlers import trade
@@ -83,13 +85,22 @@ async def test_pasting_url_yields_market_card_with_buy_buttons_and_sizes(
     update = make_message_update("https://polymarket.com/event/will-it-rain")
     context = make_context(settings, session_factory)
 
+    update.message.reply_photo = AsyncMock()
+
     await trade.show_market_card(update, context, update.message.text)
 
-    text = update.message.reply_text.call_args.args[0]
+    # Spec change (trade card redesign): the market card is now a rendered
+    # photo, its text carried as the caption. This test previously read the
+    # card from reply_text; every original assertion is kept, now against
+    # the photo's caption and keyboard, plus a check the image is real.
+    update.message.reply_text.assert_not_awaited()
+    kwargs = update.message.reply_photo.call_args.kwargs
+    assert Image.open(BytesIO(kwargs["photo"])).size == (1200, 800)
+    text = kwargs["caption"]
     assert "Will it rain tomorrow?" in text
     assert "YES 0.60" in text and "NO 0.40" in text
 
-    markup = update.message.reply_text.call_args.kwargs["reply_markup"]
+    markup = kwargs["reply_markup"]
     labels = [button.text for row in markup.inline_keyboard for button in row]
     # Every preset size appears for both sides, plus a custom option each.
     for size in trade.PRESET_SIZES:

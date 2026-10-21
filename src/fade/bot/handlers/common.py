@@ -32,6 +32,20 @@ def sanitize(text: str, limit: int = 120) -> str:
     return cleaned[:limit] + ("…" if len(cleaned) > limit else "")
 
 
+async def edit_card(query, text: str, reply_markup=None) -> None:
+    """Edit the message a tapped button sits on, whether it's text or a photo.
+
+    Market cards are photo messages (their text lives in the caption), and
+    Telegram's editMessageText errors on those — so photos get their caption
+    edited and text messages are edited exactly as before.
+    """
+    photo = getattr(getattr(query, "message", None), "photo", None)
+    if isinstance(photo, (tuple, list)) and photo:
+        await query.edit_message_caption(caption=text, reply_markup=reply_markup)
+    else:
+        await query.edit_message_text(text, reply_markup=reply_markup)
+
+
 def dm_button(bot_username: str, payload: str) -> InlineKeyboardMarkup:
     url = f"https://t.me/{bot_username}?start={payload}"
     return InlineKeyboardMarkup([[InlineKeyboardButton("Open DM", url=url)]])

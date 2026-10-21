@@ -155,7 +155,10 @@ def build_application(settings: Settings) -> Application:
         sessions, fetch=resolutions.fetch_resolved_positions, reporter=reporter
     )
     app.bot_data["broadcasts"] = BroadcastQueue(
-        send=app.bot.send_message, on_forbidden=_deactivate_clan, reporter=reporter
+        send=app.bot.send_message,
+        send_photo=app.bot.send_photo,  # buy broadcasts go out as card images
+        on_forbidden=_deactivate_clan,
+        reporter=reporter,
     )
     # DB-backed so in-flight trade cards survive a restart (memory is the fast path).
     app.bot_data["cards"] = CardStore(session_factory=sessions)

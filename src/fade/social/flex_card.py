@@ -52,6 +52,7 @@ _MUTED = (150, 144, 138)
 _DIVIDER = (52, 46, 42)
 _WIN = (150, 226, 74)
 _LOSS = (240, 70, 60)
+_BRAND = (236, 104, 61)  # blood orange (DESIGN.md primary-container)
 
 # Frosted panel (x0, y0, x1, y1), its corner radius, and inner padding.
 _PANEL = (606, 52, 1152, 748)
@@ -441,20 +442,31 @@ def _qr_tile(link: str, target: int = 132) -> Image.Image:
 # -- composition ----------------------------------------------------------------------
 
 
-@lru_cache(maxsize=2)
 def _scene(won: bool) -> Image.Image:
-    """Backdrop + hero art, cached per color: the expensive, data-free part."""
-    accent = _WIN if won else _LOSS
+    """Backdrop + hero art for a flex card: green for a win, red for a loss."""
+    return _toned_scene("green" if won else "red")
+
+
+@lru_cache(maxsize=3)
+def _toned_scene(tone: str) -> Image.Image:
+    """Backdrop + hero art, cached per tone: the expensive, data-free part.
+
+    "green" and "red" are the flex card's win/loss looks; "neutral" (market
+    cards, which aren't anyone's win or loss yet) keeps the banner's own
+    orange liquid and the logo's own green-red-green glass. Shared with
+    fade.social.trade_card so every card Fade sends is one visual family.
+    """
+    accent = {"green": _WIN, "red": _LOSS, "neutral": _BRAND}[tone]
     bg = Image.open(_BG_PATH).convert("RGB")
-    if won:  # the banner's liquid blobs are orange/red; swapped, they go green
+    if tone == "green":  # the banner's liquid blobs are orange/red; swapped, they go green
         bg = _swap_rg(bg)
     bg = bg.filter(ImageFilter.GaussianBlur(10))
     bg = Image.blend(bg, _solid(bg.size, _BASE), 0.6)
 
-    glow = _radial(bg.size, (300, 410), (290, 300), strength=85)
+    glow = _radial(bg.size, (300, 410), (290, 300), strength=60 if tone == "neutral" else 85)
     bg = Image.composite(_solid(bg.size, accent), bg, glow)
 
-    candles = _candle_art(won)  # green-red-green, or red-green-red for losses
+    candles = _candle_art(tone != "red")  # green-red-green, or red-green-red
     height = 620
     width = round(candles.width * height / candles.height)
     candles = candles.resize((width, height), Image.LANCZOS)
@@ -489,6 +501,38 @@ def _glass_panel(card: Image.Image, accent) -> None:
     card.paste(_solid(size, (255, 255, 255)), (x0, y0), ImageChops.multiply(ring, light))
 
 
+def _brand_row(card, left, right, y, status_label, color, green_mark: bool) -> None:
+    """Glass candle mark + FADE wordmark, a status capsule on the right."""
+    draw = ImageDraw.Draw(card)
+    mark = _candle_art(green_mark)
+    mark = mark.resize((round(mark.width * 34 / mark.height), 34), Image.LANCZOS)
+    _screen_onto(card, mark, (left - 4, y), feather=False)
+    _draw_text(draw, (left + mark.width + 6, y + 3), "FADE", _font(24, 600), _TEXT, tracking=7)
+    status = drawable(status_label).upper()
+    status_w = _text_width(status, _font(17, 600), 2) + 32
+    _pill(card, (right - status_w, y - 1), status, color)
+
+
+def _title_block(draw, text: str, left: int, y: int, width: int) -> int:
+    """Market question: two lines max, stepping the size down before cutting,
+    so a long title never squeezes the headline. Returns the y below it."""
+    title = drawable(text)
+    for size in (31, 28, 26):
+        title_font = _font(size, 500)
+        if len(_wrap(title, title_font, width, max_lines=99)) <= 2:
+            break
+    for line in _wrap(title, title_font, width, max_lines=2):
+        draw.text((left, y), line, font=title_font, fill=_TEXT)
+        y += round(title_font.size * 1.3)
+    return y
+
+
+def _cta(draw, left: int, top: int, line_1: str, line_2: str) -> None:
+    """Footer call to action: a muted question over a bold answer."""
+    draw.text((left, top), line_1, font=_font(20, 400), fill=_MUTED)
+    draw.text((left, top + 28), line_2, font=_font(28, 650), fill=_TEXT)
+
+
 def render_flex_card_image(data: FlexCardData) -> bytes:
     """Draw the flex card and return PNG bytes."""
     with _RENDER_LOCK:
@@ -505,30 +549,9 @@ def _render(data: FlexCardData) -> bytes:
     left, right = x0 + _PAD, x1 - _PAD
     content_w = right - left
 
-    # Brand row: glass candle mark + wordmark, status capsule on the right.
     brand_y = y0 + _PAD
-    mark = _candle_art(data.won)
-    mark = mark.resize((round(mark.width * 34 / mark.height), 34), Image.LANCZOS)
-    _screen_onto(card, mark, (left - 4, brand_y), feather=False)
-    wordmark = _font(24, 600)
-    _draw_text(draw, (left + mark.width + 6, brand_y + 3), "FADE", wordmark, _TEXT, tracking=7)
-    status = drawable(data.status_label).upper()
-    status_w = _text_width(status, _font(17, 600), 2) + 32
-    _pill(card, (right - status_w, brand_y - 1), status, accent)
-
-    # Market question: two lines max, stepping the size down before cutting,
-    # so a long title never squeezes the headline figure.
-    title = drawable(data.title)
-    for size in (31, 28, 26):
-        title_font = _font(size, 500)
-        lines = _wrap(title, title_font, content_w, max_lines=99)
-        if len(lines) <= 2:
-            break
-    lines = _wrap(title, title_font, content_w, max_lines=2)
-    y = brand_y + 34 + 30
-    for line in lines:
-        draw.text((left, y), line, font=title_font, fill=_TEXT)
-        y += round(title_font.size * 1.3)
+    _brand_row(card, left, right, brand_y, data.status_label, accent, green_mark=data.won)
+    y = _title_block(draw, data.title, left, brand_y + 34 + 30, content_w)
 
     # Side + hold time.
     meta_y = y + 12
@@ -592,9 +615,7 @@ def _render(data: FlexCardData) -> bytes:
     if tile is not None:
         tile_y = footer_top + (footer_h - tile.height) // 2
         card.paste(tile, (right - tile.width, tile_y), _rounded_mask(tile.size, 14))
-        cta_top = footer_top + (footer_h - 64) // 2
-        draw.text((left, cta_top), CTA_LINE_1, font=_font(20, 400), fill=_MUTED)
-        draw.text((left, cta_top + 28), CTA_LINE_2, font=_font(28, 650), fill=_TEXT)
+        _cta(draw, left, footer_top + (footer_h - 64) // 2, CTA_LINE_1, CTA_LINE_2)
     else:
         draw.text((left, footer_top + (footer_h - 28) // 2), CTA_NO_LINK,
                   font=_font(22, 500), fill=_MUTED)

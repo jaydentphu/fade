@@ -48,6 +48,9 @@ class PendingMessage:
     reply_to_message_id: int | None = None
     on_sent: Callable[[Any], None] | None = None  # called with the sent Message
     attempts: int = 0  # failed send attempts so far (see MAX_SEND_ATTEMPTS)
+    # Rendered card image. When set (and the queue can send photos) the card
+    # goes out as a photo with `text` as its caption; otherwise as plain text.
+    photo: bytes | None = None
 
 
 @dataclass
@@ -59,6 +62,9 @@ class BroadcastQueue:
 
     send: Callable[..., Any]  # async callable(chat_id=, text=, ...)
     now: Callable[[], float] = time.monotonic
+    # async callable(chat_id=, photo=, caption=, ...). None = text-only queue:
+    # cards degrade to their caption, so a queue without it never breaks.
+    send_photo: Callable[..., Any] | None = None
     # Called with the chat_id when a send fails with Forbidden (bot kicked):
     # app wiring points this at clan deactivation. The chat's queue is dropped.
     on_forbidden: Callable[[int], Awaitable[None]] | None = None
@@ -109,12 +115,21 @@ class BroadcastQueue:
                 self._sent_global.append(stamp)
                 budget -= 1
                 try:
-                    sent = await self.send(
-                        chat_id=message.chat_id,
-                        text=message.text,
-                        reply_markup=message.reply_markup,
-                        reply_to_message_id=message.reply_to_message_id,
-                    )
+                    if message.photo is not None and self.send_photo is not None:
+                        sent = await self.send_photo(
+                            chat_id=message.chat_id,
+                            photo=message.photo,
+                            caption=message.text,
+                            reply_markup=message.reply_markup,
+                            reply_to_message_id=message.reply_to_message_id,
+                        )
+                    else:
+                        sent = await self.send(
+                            chat_id=message.chat_id,
+                            text=message.text,
+                            reply_markup=message.reply_markup,
+                            reply_to_message_id=message.reply_to_message_id,
+                        )
                 except Forbidden as error:
                     logger.warning("bot removed from chat %s; dropping its queue", chat_id)
                     await report_safely(self.reporter, error)

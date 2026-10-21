@@ -7,6 +7,8 @@ so FOK, slippage guard, builder code, and idempotency all apply unchanged.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -21,6 +23,8 @@ from fade.bot.handlers.trade import user_onboarded
 from fade.db.models import Clan, ClanMember, FadeEvent, User
 from fade.social.broadcast import PendingMessage, hide_amounts_for, render_trade_card
 from fade.social.leaderboard import EASTERN, compute_leaderboard, week_start
+
+logger = logging.getLogger(__name__)
 
 GROUP_ONLY_TEXT = "That's a group-chat move. Add me to your group and run it there."
 SETUP_DONE_TEXT = (
@@ -255,6 +259,19 @@ async def broadcast_fill(
         hide_amounts=hide,
         is_sell=is_sell,
     )
+    # Buys go out as the trader-vs-open-slot card image, rendered once and
+    # shared by every clan; the text above becomes its caption. Sells stay
+    # text: there's nothing to fade. Skipped when the queue can't send photos.
+    photo = None
+    if not is_sell and getattr(queue, "send_photo", None) is not None:
+        photo = await _render_broadcast_card(
+            who=username,
+            question=question,
+            side_label=side_label,
+            amount_usdc=amount_usdc,
+            price=price,
+            hide_amounts=hide,
+        )
     for chat_id in chat_ids:
         markup = None
         if not is_sell:
@@ -277,11 +294,24 @@ async def broadcast_fill(
                 await get_store(context).update("fade", key, card)
 
             queue.enqueue(
-                PendingMessage(chat_id=chat_id, text=text, reply_markup=markup),
+                PendingMessage(chat_id=chat_id, text=text, reply_markup=markup, photo=photo),
                 on_sent=_remember,
             )
         else:
             queue.enqueue(PendingMessage(chat_id=chat_id, text=text))
+
+
+async def _render_broadcast_card(**card_fields) -> bytes | None:
+    """Render the broadcast card off the event loop. A render failure must
+    never cost the clan its broadcast: return None and the card goes out as
+    text, exactly as it did before images existed."""
+    from fade.social.trade_card import generate_broadcast_card
+
+    try:
+        return await asyncio.to_thread(generate_broadcast_card, **card_fields)
+    except Exception:
+        logger.exception("broadcast card render failed; falling back to text")
+        return None
 
 
 # -- fade / copy taps ----------------------------------------------------------
